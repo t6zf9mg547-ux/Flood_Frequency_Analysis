@@ -66,13 +66,41 @@ def _agreement_assessment(relative_spread_pct: float) -> str:
 
 
 class FloodFrequencyAnalysis:
-    def __init__(self, data, station_id: str = "station", years=None):
+    def __init__(self, data, station_id: str = "station", years=None,
+                 variable_name: str = "Flood magnitude", units: str = None,
+                 short_name: str = "Flood"):
+        """
+        variable_name/units/short_name let this tool be used for any annual-
+        maximum series, not just streamflow -- e.g. annual maximum rainfall
+        depth. The statistics (GEV/Gumbel/LogNormal/etc. fitting) are
+        already fully generic; these three control only the text shown in
+        plots and reports:
+          - variable_name: axis label, e.g. "Rainfall depth" (default:
+            "Flood magnitude", unchanged from prior behavior)
+          - units: appended to variable_name in parentheses, e.g. "mm"
+            (default: None -> no unit suffix, unchanged from prior behavior)
+          - short_name: used in titles/headers, e.g. "Rainfall" -> "Rainfall
+            frequency curve" (default: "Flood", unchanged from prior
+            behavior -> "Flood frequency curve")
+        Leaving all three at their defaults reproduces the exact prior
+        output. One caveat NOT handled automatically: the Bulletin 17B
+        regional-skew feature (regional_skew.py) uses MSE coefficients
+        empirically calibrated from streamflow data specifically -- treat
+        it as streamflow-only regardless of these settings.
+        """
         self.data = np.asarray(data, dtype=float)
         self._validate_input(self.data, years)
         self.n = self.data.size
         self.station_id = station_id
         self.years = np.asarray(years) if years is not None else None
+        self.variable_name = variable_name
+        self.units = units
+        self.short_name = short_name
         self.fits = {}  # (dist_key, method) -> FitResult
+
+    def axis_label(self) -> str:
+        """Text used for the value axis on every plot, e.g. 'Rainfall depth (mm)'."""
+        return f"{self.variable_name} ({self.units})" if self.units else self.variable_name
 
     @staticmethod
     def _validate_input(data: np.ndarray, years=None):
@@ -90,7 +118,7 @@ class FloodFrequencyAnalysis:
             n_nan = int(np.isnan(data).sum())
             raise ValueError(
                 f"{n_nan} missing (NaN) value(s) in the data. Remove or fill them "
-                f"before fitting -- flood frequency distributions cannot be fit "
+                f"before fitting -- these statistical distributions cannot be fit "
                 f"through missing values.")
         if np.isinf(data).any():
             raise ValueError("Infinite value(s) found in the data -- check the input file "
@@ -99,7 +127,7 @@ class FloodFrequencyAnalysis:
         if np.any(data <= 0):
             n_bad = int(np.sum(data <= 0))
             raise ValueError(
-                f"{n_bad} zero or negative value(s) in the data. A flood/flow series should "
+                f"{n_bad} zero or negative value(s) in the data. This series should "
                 f"be strictly positive -- this usually means a data-entry error or a missing-"
                 f"value sentinel (e.g. -999, 0) that needs to be cleaned before fitting. "
                 f"(Zero/negative values would otherwise silently produce NaN deep inside the "
@@ -409,7 +437,7 @@ class FloodFrequencyAnalysis:
 
         lines = []
         lines.append("=" * 70)
-        lines.append(f"FLOOD FREQUENCY ANALYSIS — SUMMARY & RECOMMENDATION")
+        lines.append(f"{self.short_name.upper()} FREQUENCY ANALYSIS — SUMMARY & RECOMMENDATION")
         lines.append(f"Station / case: {self.station_id}")
         lines.append("=" * 70)
         lines.append("")
@@ -497,7 +525,7 @@ class FloodFrequencyAnalysis:
                 "AD_stat", "fit_assessment"]
         lines.append(table[cols].head(5).round(3).to_string(index=False))
         lines.append("")
-        lines.append(f"Design flood estimates — {DISTRIBUTIONS[best_key]['label']} "
+        lines.append(f"Design {self.short_name.lower()} estimates — {DISTRIBUTIONS[best_key]['label']} "
                       f"({best_method.upper()}), with {confidence_level:g}% bootstrap CI "
                       f"({ci_n_boot} resamples):")
         return_periods_arr = np.asarray(return_periods, dtype=float)
@@ -523,7 +551,7 @@ class FloodFrequencyAnalysis:
         lines.append("")
 
         lines.append("-" * 70)
-        lines.append("MODEL-AVERAGED DESIGN FLOOD (Akaike-weighted across all fitted distributions)")
+        lines.append(f"MODEL-AVERAGED DESIGN {self.short_name.upper()} (Akaike-weighted across all fitted distributions)")
         lines.append("-" * 70)
         lines.append("Rather than betting entirely on the single AIC-best distribution above, this")
         lines.append("blends every fitted distribution's quantile, weighted by its Akaike weight")

@@ -163,3 +163,37 @@ def test_accepts_minimum_valid_size():
 def test_valid_reference_data_does_not_raise(reference_data):
     x, years = reference_data
     FloodFrequencyAnalysis(x, station_id="test", years=years)  # should not raise
+
+
+# -- Generic variable support (variable_name/units/short_name) -- #
+
+def test_default_axis_label_unchanged(reference_data):
+    # defaults must reproduce the exact original "Flood magnitude" wording
+    x, years = reference_data
+    ffa = FloodFrequencyAnalysis(x, station_id="test", years=years)
+    assert ffa.axis_label() == "Flood magnitude"
+    assert ffa.short_name == "Flood"
+
+
+def test_custom_variable_name_and_units(reference_data):
+    x, years = reference_data
+    ffa = FloodFrequencyAnalysis(x, station_id="test", years=years,
+                                  variable_name="Rainfall depth", units="mm")
+    assert ffa.axis_label() == "Rainfall depth (mm)"
+
+
+def test_variable_name_without_units_has_no_parentheses(reference_data):
+    x, years = reference_data
+    ffa = FloodFrequencyAnalysis(x, station_id="test", years=years, variable_name="Rainfall depth")
+    assert ffa.axis_label() == "Rainfall depth"
+    assert "(" not in ffa.axis_label()
+
+
+def test_short_name_flows_into_summary_header(reference_data):
+    x, years = reference_data
+    ffa = FloodFrequencyAnalysis(x, station_id="test", years=years, short_name="Rainfall")
+    ffa.fit_all()
+    text = ffa.generate_recommendation(ci_n_boot=50)
+    assert "RAINFALL FREQUENCY ANALYSIS" in text
+    assert "FLOOD FREQUENCY ANALYSIS" not in text
+    assert "Design rainfall estimates" in text

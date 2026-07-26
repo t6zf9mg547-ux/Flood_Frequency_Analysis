@@ -71,11 +71,12 @@ def load_case_config(case_name: str, project_root: Path) -> dict:
 
     Recognized keys mirror run_analysis.py's CLI flag names (with dashes
     replaced by underscores, as TOML keys can't contain dashes as bare
-    identifiers): value_col, year_col, plotting_position,
-    descriptive_plotting_position, n_boot, confidence_level, regional_skew,
-    regional_skew_mse, no_plots, xlsx_report, pdf_report. Unrecognized keys
-    are ignored (not an error), so a config file can be extended later
-    without breaking older runs of the tool against it.
+    identifiers): value_col, year_col, variable_name, units, short_name,
+    plotting_position, descriptive_plotting_position, n_boot,
+    confidence_level, regional_skew, regional_skew_mse, no_plots,
+    xlsx_report, pdf_report. Unrecognized keys are ignored (not an error),
+    so a config file can be extended later without breaking older runs of
+    the tool against it.
     """
     config_path = project_root / "Data" / f"{case_name}.toml"
     if not config_path.exists():
@@ -177,7 +178,7 @@ def write_report(path, ffa, return_periods=(2, 5, 10, 20, 25, 50, 100, 200, 500,
     # -- Summary sheet --
     ws = wb.active
     ws.title = "Summary"
-    ws["A1"] = f"Flood Frequency Analysis — {ffa.station_id}"
+    ws["A1"] = f"{ffa.short_name} Frequency Analysis — {ffa.station_id}"
     ws["A1"].font = title_font
     stats = ffa.descriptive_stats()
     rows = [(k, v) for k, v in stats.items()]

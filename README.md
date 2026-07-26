@@ -74,6 +74,16 @@ uv run python Module/run_analysis.py P1009 --regional-skew 0.0 --regional-skew-m
 uv run python Module/run_analysis.py P1009 --no-plots
 ```
 
+## Beyond streamflow: any annual-maximum series
+
+The statistics here (GEV, Gumbel, LogNormal, Pearson III, etc.) are fully generic — nothing requires the input to be discharge. To analyze, e.g., annual maximum rainfall depth instead of flood flow, relabel the output with:
+```bash
+uv run python Module/run_analysis.py RainStation --variable-name "Rainfall depth" --units mm --short-name Rainfall
+```
+This changes every plot axis, chart title, `summary.txt` header, and Excel/PDF report title to match (e.g. "Rainfall frequency curve", "RAINFALL FREQUENCY ANALYSIS", axis label "Rainfall depth (mm)"). Leaving these flags unset reproduces the exact original "Flood magnitude" / "Flood Frequency Analysis" wording — this is purely additive, nothing changes unless you opt in.
+
+**One caveat that does NOT get handled by these flags:** `--regional-skew` (Bulletin 17B weighted skew) uses MSE coefficients empirically calibrated from streamflow data specifically. Avoid it for non-streamflow variables regardless of `--short-name`.
+
 `--pdf-report` bundles the text summary, the dashboard, and every individual full-size plot into one `Output/<CaseName>/<CaseName>_report.pdf` — the single file to actually hand to a colleague, instead of the separate CSVs/PNGs.
 
 ## Per-case settings file (optional)
@@ -86,7 +96,7 @@ regional_skew_mse = 0.15
 n_boot = 2000
 pdf_report = true
 ```
-Then `uv run python Module/run_analysis.py P1009` picks these up automatically — no flags needed. Any CLI flag you *do* pass still overrides the file for that one run (e.g. `--confidence-level 95` overrides the `90` above without touching the saved file). Recognized keys mirror the CLI flag names with underscores instead of dashes: `value_col`, `year_col`, `plotting_position`, `descriptive_plotting_position`, `n_boot`, `confidence_level`, `regional_skew`, `regional_skew_mse`, `no_plots`, `xlsx_report`, `pdf_report`.
+Then `uv run python Module/run_analysis.py P1009` picks these up automatically — no flags needed. Any CLI flag you *do* pass still overrides the file for that one run (e.g. `--confidence-level 95` overrides the `90` above without touching the saved file). Recognized keys mirror the CLI flag names with underscores instead of dashes: `value_col`, `year_col`, `variable_name`, `units`, `short_name`, `plotting_position`, `descriptive_plotting_position`, `n_boot`, `confidence_level`, `regional_skew`, `regional_skew_mse`, `no_plots`, `xlsx_report`, `pdf_report`.
 
 A case with no `.toml` file behaves exactly as before — this is entirely optional.
 

@@ -11,6 +11,7 @@ is cheap insurance against that happening silently again.
 """
 import pandas as pd
 import pytest
+import matplotlib.pyplot as plt
 from floodfreq.analysis import FloodFrequencyAnalysis
 from floodfreq import plots as P
 
@@ -77,3 +78,17 @@ def test_save_pdf_report(fitted_ffa, tmp_path):
     from pypdf import PdfReader
     reader = PdfReader(str(out))
     assert len(reader.pages) >= 5  # text page(s) + dashboard + individual plots
+
+
+def test_probability_plot_uses_custom_variable_labels(reference_data):
+    # confirms the variable_name/units/short_name generalization (added for
+    # non-streamflow use, e.g. rainfall) actually reaches the rendered plot
+    x, years = reference_data
+    ffa = FloodFrequencyAnalysis(x, station_id="test", years=years,
+                                  variable_name="Rainfall depth", units="mm", short_name="Rainfall")
+    ffa.fit_all()
+    fig, ax = plt.subplots()
+    P.probability_plot(ffa, ax=ax)
+    assert ax.get_ylabel() == "Rainfall depth (mm)"
+    assert "Rainfall frequency curve" in ax.get_title()
+    plt.close(fig)

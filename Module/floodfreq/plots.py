@@ -43,8 +43,8 @@ def probability_plot(ffa, dist_keys=None, methods=None, ax=None, log_x=True, max
     if log_x:
         ax.set_xscale("log")
     ax.set_xlabel("Return period T (years)")
-    ax.set_ylabel("Flood magnitude")
-    ax.set_title(f"Flood frequency curve — {ffa.station_id}")
+    ax.set_ylabel(ffa.axis_label())
+    ax.set_title(f"{ffa.short_name} frequency curve — {ffa.station_id}")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(fontsize=8)
     return ax
@@ -75,7 +75,7 @@ def quantile_plot_with_ci(ffa, dist_key, method, return_periods=None,
 
     ax.set_xscale("log")
     ax.set_xlabel("Return period T (years)")
-    ax.set_ylabel("Flood magnitude")
+    ax.set_ylabel(ffa.axis_label())
     ax.set_title(f"{DISTRIBUTIONS[dist_key]['label']} fit with bootstrap CI — {ffa.station_id}")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(fontsize=8)
@@ -159,7 +159,7 @@ def data_histogram(ffa, dist_key=None, method=None, bins=None, ax=None):
         ax.plot(x_grid, r.pdf(x_grid), color="crimson", lw=2,
                 label=f"{DISTRIBUTIONS[dist_key]['label']} ({method.upper()}) fit")
 
-    ax.set_xlabel("Flood magnitude")
+    ax.set_xlabel(ffa.axis_label())
     ax.set_ylabel("Density")
     ax.set_title(f"Input data histogram — {ffa.station_id}")
     ax.grid(True, alpha=0.3)
@@ -206,7 +206,7 @@ def data_quality_plot(ffa, ax=None):
 
     xlabel = "Year" if ffa.years is not None else "Record index"
     ax.set_xlabel(xlabel)
-    ax.set_ylabel("Flood magnitude")
+    ax.set_ylabel(ffa.axis_label())
     ax.set_title(f"Data quality: time series & trend — {ffa.station_id}\n"
                  f"Mann-Kendall: {mk['trend']} (p={mk['p_value']:.3f})")
     ax.grid(True, alpha=0.3)
@@ -285,7 +285,7 @@ def dashboard(ffa, best_key, best_method, n_boot=500, alpha=0.05, fig=None):
     ax_txt.text(0.02, 0.98, "\n".join(lines), transform=ax_txt.transAxes,
                 fontsize=9, va="top", family="monospace")
 
-    fig.suptitle(f"Flood Frequency Analysis Dashboard — {ffa.station_id}", fontsize=14, fontweight="bold")
+    fig.suptitle(f"{ffa.short_name} Frequency Analysis Dashboard — {ffa.station_id}", fontsize=14, fontweight="bold")
     return fig
 
 
@@ -367,7 +367,7 @@ def save_pdf_report(ffa, path, best_key, best_method, recommendation_text,
         plt.close(fig)
 
         d = pdf.infodict()
-        d["Title"] = f"Flood Frequency Analysis — {ffa.station_id}"
+        d["Title"] = f"{ffa.short_name} Frequency Analysis — {ffa.station_id}"
         d["Author"] = "floodfreq"
 
     return path

@@ -165,6 +165,19 @@ def parse_args():
                          "If omitted, you'll be prompted to pick from Data/ interactively.")
     p.add_argument("--value-col", default=None, help="Column name of the flood series (auto-detected if omitted)")
     p.add_argument("--year-col", default=None, help="Column name of the year index (auto-detected if omitted)")
+    p.add_argument("--variable-name", default=None,
+                   help="Label for the analyzed variable, used on plot axes (default: 'Flood magnitude'). "
+                        "Lets this tool be used for any annual-maximum series, not just streamflow -- "
+                        "e.g. --variable-name 'Rainfall depth' --units mm for extreme rainfall analysis.")
+    p.add_argument("--units", default=None,
+                   help="Units for --variable-name, appended in parentheses on plot axes (e.g. 'mm', 'm3/s'). "
+                        "No default -- omitted from labels if not given.")
+    p.add_argument("--short-name", default=None,
+                   help="Short label used in titles/headers (default: 'Flood', giving 'Flood frequency "
+                        "curve', 'FLOOD FREQUENCY ANALYSIS', etc.). For rainfall, try --short-name Rainfall. "
+                        "NOTE: the --regional-skew feature (Bulletin 17B) uses MSE coefficients empirically "
+                        "calibrated from streamflow data specifically -- avoid it for non-streamflow variables "
+                        "regardless of this setting.")
     p.add_argument("--plotting-position", default=None,
                    choices=["weibull", "hazen", "cunnane", "gringorten", "hosking", "blom"],
                    help="Override the empirical frequency formula recorded/used for probability-"
@@ -225,6 +238,9 @@ def main():
 
     value_col = resolve_setting(args.value_col, config, "value_col", None)
     year_col = resolve_setting(args.year_col, config, "year_col", None)
+    variable_name = resolve_setting(args.variable_name, config, "variable_name", "Flood magnitude")
+    units = resolve_setting(args.units, config, "units", None)
+    short_name = resolve_setting(args.short_name, config, "short_name", "Flood")
     plotting_position = resolve_setting(args.plotting_position, config, "plotting_position", None)
     descriptive_plotting_position = resolve_setting(
         args.descriptive_plotting_position, config, "descriptive_plotting_position", "weibull")
@@ -251,7 +267,8 @@ def main():
           f"{f' ({years.min()}-{years.max()})' if years is not None else ''}.")
 
     try:
-        ffa = FloodFrequencyAnalysis(values, station_id=case_name, years=years)
+        ffa = FloodFrequencyAnalysis(values, station_id=case_name, years=years,
+                                      variable_name=variable_name, units=units, short_name=short_name)
     except ValueError as e:
         sys.exit(f"ERROR: {e}")
 

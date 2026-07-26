@@ -2,6 +2,13 @@
 
 All notable changes to the Flood Frequency Analysis tool are documented here.
 
+## [0.3.0] - 2026-07-26
+
+### Added — Generic (non-streamflow) variable support
+- `--variable-name`, `--units`, `--short-name` — the tool can now be used for any annual-maximum series, not just discharge (e.g. annual maximum rainfall depth). Changes every plot axis, chart title, `summary.txt` header, and Excel/PDF report title to match. Fully backward compatible: leaving these unset reproduces the exact original "Flood magnitude" / "Flood Frequency Analysis" wording
+- Recognized as `.toml` config keys too (`variable_name`, `units`, `short_name`)
+- Documented caveat: `--regional-skew` (Bulletin 17B) uses MSE coefficients empirically calibrated from streamflow data specifically — not adjusted by these flags, and should be avoided for non-streamflow variables
+
 ## [0.2.0] - 2026-07-26
 
 ### Added — Run provenance & per-case configuration
