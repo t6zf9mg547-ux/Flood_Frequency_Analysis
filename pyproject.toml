@@ -1,37 +1,41 @@
 # ---------------------------------------------------------------------------
-# Template pyproject.toml — copy into a new project folder, then:
-#   1. Update `name` and `description` below
-#   2. Run `uv sync` to create .venv and install everything listed here
+# Flood Frequency Analysis — Module/ scripts project
+#   1. Run `uv sync` from the project root to create .venv and install everything
+#   2. Run analyses with: uv run python Module/run_analysis.py <CaseName>
 #   3. Add/remove packages as needed with `uv add <pkg>` / `uv remove <pkg>`
 # ---------------------------------------------------------------------------
 
 [project]
-name = "change-me"                     # e.g. "extract-drainage-system"
+name = "flood-frequency-analysis"
 version = "0.1.0"
-description = "Change me: one-line description of what this project does"
-requires-python = ">=3.13"
+description = "Flood frequency analysis on annual-maximum inflow series: fits 9 candidate distributions (Normal, LogNormal 2p/3p, Gumbel, GEV, Exponential, Gamma, Pearson III, Log-Pearson III) via MOM/MLE/PWM, ranks them by AIC/BIC/KS, and reports a best-fit recommendation with bootstrap confidence intervals."
+requires-python = ">=3.11"
 dependencies = [
-    "geopandas>=1.0",
-    "pandas>=2.2",
-    "fiona>=1.10.1",
-    "shapely>=2.0",
     "numpy>=2.0",
-    "pyproj>=3.6",
+    "pandas>=2.2",
+    "scipy>=1.13",
+    "matplotlib>=3.9",
+    "openpyxl>=3.1",
+    "lmoments3>=1.0.8",
 ]
 
 # Notes:
-# - tkinter is part of the Python standard library — do NOT add it here.
-#   Just make sure the Python build you're using includes it (standard on
-#   macOS python.org / Homebrew builds).
-# - GDAL itself must still be installed at the system level for fiona/
-#   geopandas to work: `brew install gdal`.
-# - Add project-specific extras as needed, e.g.:
-#     "tqdm>=4.66",       # progress bars for batch delineation
-#     "pyogrio>=0.9",     # faster I/O backend, alternative to fiona
+# - lmoments3 provides probability-weighted-moment / L-moment fitting for
+#   Gumbel, GEV, Gamma, Pearson III, and the generalized-normal (3-parameter
+#   LogNormal) distributions.
+# - openpyxl is only needed for the optional --xlsx-report output; the core
+#   CSV/PNG workflow (Output/, Plot/) doesn't require it, but it's cheap to
+#   keep as a standard dependency rather than making it conditional.
+# - Reading legacy .xls (not .xlsx) input files additionally needs `xlrd`:
+#     uv add xlrd
+#   Not included by default since Data/<CaseName>.csv is the expected input.
+# - Add optional extras as needed, e.g.:
+#     "tqdm>=4.66",       # progress bars if you add batch/multi-case looping
+#     "pyogrio>=0.9",     # only relevant if this project grows a GIS component
 
 [tool.uv]
-# This is a scripts project (Module/), not an installable library —
-# skip building/installing it as a package. Without this, `uv sync`/
-# `uv add` fail with a hatchling "no file selection defined" error,
-# since there's no actual package for it to build a wheel from.
+# This is a scripts project (Module/run_analysis.py + Module/floodfreq/),
+# not an installable library — skip building/installing it as a package.
+# Without this, `uv sync`/`uv add` fail with a hatchling "no file selection
+# defined" error, since there's no actual package for it to build a wheel from.
 package = false

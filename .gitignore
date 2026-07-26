@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# .gitignore template for uv-based Python projects (geopandas/GIS scripts)
+# .gitignore for the Flood Frequency Analysis project (uv-based)
 # ---------------------------------------------------------------------------
 
 # Virtual environment
@@ -35,10 +35,17 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
-# Project data & outputs - regenerated / local-only, not tracked in git
-Data/
-Output/
-Plot/
+# Input data -- kept locally only, not tracked in git
+/Data/*
+!/Data/.gitkeep
+
+# Generated output -- regenerated locally, not tracked in git
+/Output/*
+!/Output/.gitkeep
+
+# Generated plots -- regenerated locally, not tracked in git
+/Plot/*
+!/Plot/.gitkeep
 
 # Logs
 *.log
