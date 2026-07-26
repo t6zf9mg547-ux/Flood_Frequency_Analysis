@@ -167,10 +167,211 @@ def data_histogram(ffa, dist_key=None, method=None, bins=None, ax=None):
     return ax
 
 
+def data_quality_plot(ffa, ax=None):
+    """
+    Time-series plot of the annual-maximum series: raw values against
+    year (or index, if no year column), with the Sen's-slope trend line
+    and any Grubbs-flagged outliers highlighted, so the Mann-Kendall/
+    Grubbs test results in the summary can be sanity-checked visually.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+
+    x = ffa.data
+    t = ffa.years if ffa.years is not None else np.arange(1, x.size + 1)
+    t = np.asarray(t, dtype=float)
+
+    dqr = ffa.data_quality()
+    mk = dqr["mann_kendall"]
+    sen = dqr["sens_slope"]
+    gr = dqr["grubbs"]
+
+    ax.plot(t, x, "o-", color="steelblue", ms=4, lw=1, label="Annual maximum")
+
+    trend_line = sen["intercept"] + sen["slope"] * t
+    trend_color = "crimson" if mk["significant"] else "gray"
+    trend_style = "-" if mk["significant"] else "--"
+    ax.plot(t, trend_line, trend_style, color=trend_color, lw=1.8,
+            label=f"Sen's slope trend ({mk['trend']})")
+
+    # highlight Grubbs-flagged outliers, if any
+    if gr["high_outlier_flagged"]:
+        idx = np.argmax(x)
+        ax.scatter(t[idx], x[idx], s=140, facecolors="none", edgecolors="red",
+                   linewidths=2, zorder=6, label="Flagged high outlier (Grubbs)")
+    if gr["low_outlier_flagged"]:
+        idx = np.argmin(x)
+        ax.scatter(t[idx], x[idx], s=140, facecolors="none", edgecolors="orange",
+                   linewidths=2, zorder=6, label="Flagged low outlier (Grubbs)")
+
+    xlabel = "Year" if ffa.years is not None else "Record index"
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Flood magnitude")
+    ax.set_title(f"Data quality: time series & trend — {ffa.station_id}\n"
+                 f"Mann-Kendall: {mk['trend']} (p={mk['p_value']:.3f})")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8)
+    return ax
+
+
 # --------------------------------------------------------------------- #
 # Script-friendly save_* wrappers: build the figure, save a PNG, close it.
 # Used by run_analysis.py so batch runs over many cases don't leak figures.
 # --------------------------------------------------------------------- #
+
+def dashboard(ffa, best_key, best_method, n_boot=500, alpha=0.05, fig=None):
+    """
+    One-page overview combining all 5 individual plots plus a text panel
+    with the key numbers, for a quick at-a-glance review instead of
+    flipping between 5 separate PNGs.
+    """
+    if fig is None:
+        fig = plt.figure(figsize=(16, 10))
+    gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.3)
+
+    ax_ts = fig.add_subplot(gs[0, 0])
+    data_quality_plot(ffa, ax=ax_ts)
+    ax_ts.set_title(ax_ts.get_title(), fontsize=9)
+
+    ax_hist = fig.add_subplot(gs[0, 1])
+    data_histogram(ffa, dist_key=best_key, method=best_method, ax=ax_hist)
+    ax_hist.set_title(ax_hist.get_title(), fontsize=9)
+
+    ax_lmr = fig.add_subplot(gs[0, 2])
+    moment_ratio_diagram(ffa, ax=ax_lmr)
+    ax_lmr.set_title(ax_lmr.get_title(), fontsize=9)
+
+    ax_prob = fig.add_subplot(gs[1, 0])
+    probability_plot(ffa, ax=ax_prob)
+    ax_prob.set_title(ax_prob.get_title(), fontsize=9)
+    ax_prob.legend(fontsize=6)
+
+    ax_ci = fig.add_subplot(gs[1, 1])
+    quantile_plot_with_ci(ffa, best_key, best_method, n_boot=n_boot, alpha=alpha, ax=ax_ci)
+    ax_ci.set_title(ax_ci.get_title(), fontsize=9)
+
+    # -- Text summary panel --
+    ax_txt = fig.add_subplot(gs[1, 2])
+    ax_txt.axis("off")
+    stats = ffa.descriptive_stats()
+    table = ffa.goodness_of_fit_table()
+    best_row = table[(table["key"] == best_key) & (table["method"] == best_method)].iloc[0]
+    weights = ffa.akaike_weights()
+    top_weight = float(weights["akaike_weight"].iloc[0])
+    dqr = ffa.data_quality()
+    mk = dqr["mann_kendall"]
+    gr = dqr["grubbs"]
+    outlier_txt = ("none flagged" if not (gr["high_outlier_flagged"] or gr["low_outlier_flagged"])
+                   else "SEE WARNING in summary.txt")
+
+    lines = [
+        f"Station: {ffa.station_id}",
+        f"n = {ffa.n} years",
+        "",
+        f"Mean = {stats['mean']:.1f}   CV = {stats['CV']:.2f}   CS = {stats['CS']:.2f}",
+        "",
+        f"Trend: {mk['trend']}",
+        f"Outliers: {outlier_txt}",
+        "",
+        f"Recommended: {DISTRIBUTIONS[best_key]['label']}",
+        f"  ({best_method.upper()})",
+        f"AIC = {best_row['AIC']:.1f}   KS p = {best_row['KS_pvalue']:.3f}",
+        f"Akaike weight = {top_weight:.0%}",
+        "",
+        "See summary.txt for full",
+        "quality assessments and",
+        "the extrapolation warning.",
+    ]
+    ax_txt.text(0.02, 0.98, "\n".join(lines), transform=ax_txt.transAxes,
+                fontsize=9, va="top", family="monospace")
+
+    fig.suptitle(f"Flood Frequency Analysis Dashboard — {ffa.station_id}", fontsize=14, fontweight="bold")
+    return fig
+
+
+def save_dashboard(ffa, path, best_key, best_method, n_boot=500, alpha=0.05, dpi=150):
+    fig = plt.figure(figsize=(16, 10))
+    dashboard(ffa, best_key, best_method, n_boot=n_boot, alpha=alpha, fig=fig)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _text_page(fig, text, fontsize=8):
+    ax = fig.add_subplot(111)
+    ax.axis("off")
+    ax.text(0.02, 0.98, text, transform=ax.transAxes, fontsize=fontsize,
+            va="top", family="monospace")
+
+
+def save_pdf_report(ffa, path, best_key, best_method, recommendation_text,
+                     n_boot=500, alpha=0.05, lines_per_page=62, dpi=150):
+    """
+    Single PDF bundling the text summary (paginated) + the dashboard +
+    each individual full-size plot -- the one file to actually hand to a
+    colleague or attach to an email, rather than 5 separate PNGs and a
+    .txt file.
+
+    recommendation_text: pass the already-computed string from
+    ffa.generate_recommendation() -- accepted as a parameter rather than
+    recomputed here, since it runs a bootstrap internally and the caller
+    (run_analysis.py) has typically already paid that cost once.
+    """
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    with PdfPages(path) as pdf:
+        # -- Text summary, paginated -- #
+        text_lines = recommendation_text.split("\n")
+        for i in range(0, len(text_lines), lines_per_page):
+            chunk = "\n".join(text_lines[i:i + lines_per_page])
+            fig = plt.figure(figsize=(8.5, 11))
+            _text_page(fig, chunk)
+            pdf.savefig(fig, dpi=dpi)
+            plt.close(fig)
+
+        # -- Dashboard overview -- #
+        fig = plt.figure(figsize=(16, 10))
+        dashboard(ffa, best_key, best_method, n_boot=n_boot, alpha=alpha, fig=fig)
+        pdf.savefig(fig, dpi=dpi)
+        plt.close(fig)
+
+        # -- Individual full-size plots -- #
+        fig, ax = plt.subplots(figsize=(10, 6.5))
+        data_quality_plot(ffa, ax=ax)
+        fig.tight_layout()
+        pdf.savefig(fig, dpi=dpi)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(10, 6.5))
+        data_histogram(ffa, dist_key=best_key, method=best_method, ax=ax)
+        fig.tight_layout()
+        pdf.savefig(fig, dpi=dpi)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(10, 6.5))
+        probability_plot(ffa, ax=ax)
+        fig.tight_layout()
+        pdf.savefig(fig, dpi=dpi)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+        moment_ratio_diagram(ffa, ax=ax)
+        fig.tight_layout()
+        pdf.savefig(fig, dpi=dpi)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(10, 6.5))
+        quantile_plot_with_ci(ffa, best_key, best_method, n_boot=n_boot, alpha=alpha, ax=ax)
+        fig.tight_layout()
+        pdf.savefig(fig, dpi=dpi)
+        plt.close(fig)
+
+        d = pdf.infodict()
+        d["Title"] = f"Flood Frequency Analysis — {ffa.station_id}"
+        d["Author"] = "floodfreq"
+
+    return path
+
 
 def save_probability_plot(ffa, path, dist_keys=None, max_T=10000, dpi=150):
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -184,6 +385,15 @@ def save_probability_plot(ffa, path, dist_keys=None, max_T=10000, dpi=150):
 def save_data_histogram(ffa, path, dist_key=None, method=None, bins=None, dpi=150):
     fig, ax = plt.subplots(figsize=(7, 5))
     data_histogram(ffa, dist_key=dist_key, method=method, bins=bins, ax=ax)
+    fig.tight_layout()
+    fig.savefig(path, dpi=dpi)
+    plt.close(fig)
+    return path
+
+
+def save_data_quality_plot(ffa, path, dpi=150):
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    data_quality_plot(ffa, ax=ax)
     fig.tight_layout()
     fig.savefig(path, dpi=dpi)
     plt.close(fig)

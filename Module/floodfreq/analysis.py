@@ -10,6 +10,7 @@ import pandas as pd
 from .distributions import DISTRIBUTIONS, fit as fit_distribution
 from .moments import summarize
 from .plotting_positions import empirical_frequency, RECOMMENDED_FOR
+from . import data_quality as dq
 
 # Default fitting method per distribution family — mirrors the logic the
 # original Excel workbook used per tab (MLE for Normal/LogNormal, since it
@@ -23,48 +24,137 @@ DEFAULT_METHOD = {
 }
 
 
+# -- Plain-language quality assessments, for readers who aren't statisticians -- #
+
+def _fit_assessment(ks_pvalue: float) -> str:
+    """KS test has a rigorous p-value; use it (not AD_stat, which has none
+    here -- see FitResult.anderson_darling_statistic) for a Good/Warning call."""
+    if pd.isna(ks_pvalue):
+        return "Not assessed (KS test could not be computed)"
+    return "Good: no evidence against this fit" if ks_pvalue > 0.05 else \
+           "Warning: KS test rejects this fit at the 5% level"
+
+
+def _weight_assessment(weight: float) -> str:
+    if weight >= 0.5:
+        return "Strong relative support"
+    elif weight >= 0.2:
+        return "Moderate relative support"
+    elif weight >= 0.05:
+        return "Weak relative support"
+    else:
+        return "Negligible relative support"
+
+
+def _confidence_assessment(top_weight: float) -> str:
+    if top_weight >= 0.7:
+        return "Good: one distribution is clearly favored"
+    elif top_weight >= 0.4:
+        return "Caution: moderate confidence -- other distributions remain plausible"
+    else:
+        return "Warning: no distribution stands out -- rely on the model-averaged " \
+               "estimate rather than a single 'best' fit"
+
+
+def _agreement_assessment(relative_spread_pct: float) -> str:
+    if relative_spread_pct < 2:
+        return "Good: candidate distributions agree closely"
+    elif relative_spread_pct < 5:
+        return "Caution: moderate disagreement between candidate distributions"
+    else:
+        return "Warning: candidate distributions disagree substantially -- treat as highly uncertain"
+
+
 class FloodFrequencyAnalysis:
     def __init__(self, data, station_id: str = "station", years=None):
         self.data = np.asarray(data, dtype=float)
+        self._validate_input(self.data, years)
         self.n = self.data.size
         self.station_id = station_id
-        self.years = years
+        self.years = np.asarray(years) if years is not None else None
         self.fits = {}  # (dist_key, method) -> FitResult
 
+    @staticmethod
+    def _validate_input(data: np.ndarray, years=None):
+        """
+        Hard failures only -- structurally invalid input that would
+        otherwise crash later with a confusing error deep inside a fit
+        routine. Softer statistical concerns (short record, outliers,
+        borderline trend) are intentionally NOT raised here; those are
+        reported as warnings via data_quality() instead, since a short or
+        unusual record is still analyzable, just with more caution.
+        """
+        if data.size == 0:
+            raise ValueError("No data provided: the series is empty.")
+        if np.isnan(data).any():
+            n_nan = int(np.isnan(data).sum())
+            raise ValueError(
+                f"{n_nan} missing (NaN) value(s) in the data. Remove or fill them "
+                f"before fitting -- flood frequency distributions cannot be fit "
+                f"through missing values.")
+        if np.isinf(data).any():
+            raise ValueError("Infinite value(s) found in the data -- check the input file "
+                              "for a parsing error or a sentinel value (e.g. -999) that "
+                              "wasn't meant to be read as real data.")
+        if np.any(data <= 0):
+            n_bad = int(np.sum(data <= 0))
+            raise ValueError(
+                f"{n_bad} zero or negative value(s) in the data. A flood/flow series should "
+                f"be strictly positive -- this usually means a data-entry error or a missing-"
+                f"value sentinel (e.g. -999, 0) that needs to be cleaned before fitting. "
+                f"(Zero/negative values would otherwise silently produce NaN deep inside the "
+                f"log-based distributions -- LogNormal, Log-Pearson III -- rather than a clear error.)")
+        if data.size < 5:
+            raise ValueError(
+                f"Only {data.size} data point(s) provided; at least 5 are needed to "
+                f"attempt any distribution fit meaningfully (and even that is very "
+                f"little -- results with n < 15-20 should be treated with real caution).")
+        if years is not None:
+            years_arr = np.asarray(years)
+            if years_arr.size != data.size:
+                raise ValueError(
+                    f"years has {years_arr.size} entries but data has {data.size} -- "
+                    f"they must be the same length and correspond index-for-index.")
+
     # ------------------------------------------------------------------ #
+    def data_quality(self, alpha: float = 0.05) -> dict:
+        """
+        Run stationarity (Mann-Kendall), outlier (Grubbs), and basic input
+        validation checks on the series. See floodfreq.data_quality for
+        details on each test. Cached after the first call.
+        """
+        if not hasattr(self, "_dq_cache"):
+            self._dq_cache = dq.run_all(self.data, years=self.years, alpha=alpha)
+        return self._dq_cache
+
     def descriptive_stats(self, plotting_position="weibull") -> dict:
         return summarize(self.data, formula=plotting_position)
 
     # ------------------------------------------------------------------ #
-    def fit(self, dist_key: str, method: str = "pwm", plotting_position="weibull"):
+    def fit(self, dist_key: str, method: str = "pwm", plotting_position="weibull",
+            regional_skew: float = None, regional_mse: float = 0.302):
         """Fit one distribution/method combination and cache the result."""
         result = fit_distribution(dist_key, self.data, method=method,
-                                   plotting_position=plotting_position)
+                                   plotting_position=plotting_position,
+                                   regional_skew=regional_skew, regional_mse=regional_mse)
         self.fits[(dist_key, method)] = result
         return result
 
-    def fit_all(self, methods=None, plotting_position=None, plotting_positions=None):
+    def fit_all(self, methods=None, plotting_position=None, plotting_positions=None,
+                regional_skew=None, regional_mse=0.302):
         """
-        Fit every distribution in the registry.
+        Fit every distribution in the registry (see class-level docstring
+        for the default method/plotting-position choices and overrides).
 
-        By default each distribution uses its recommended (method,
-        plotting-position) pair:
-          - method: MLE for Normal/LogNormal-2p (mathematically ≡ MOM there),
-            PWM for Gumbel/GEV/Exponential/Pearson III/LogPearson III/
-            LogNormal-3p, MOM for Gamma-2p.
-          - plotting position (used only by PWM fits): Blom for Normal/
-            LogNormal families, Gringorten for the extreme-value/skewed
-            families (see plotting_positions.RECOMMENDED_FOR).
-
-        Overrides:
-          methods: {dist_key: method} to override the method for specific
-              distributions.
-          plotting_positions: {dist_key: formula} to override the plotting
-              position for specific distributions.
-          plotting_position: a single formula name applied to *every*
-              distribution's PWM fit, overriding the per-distribution
-              recommendations entirely (useful for sensitivity testing, or
-              to reproduce the old "one formula for everything" behaviour).
+        regional_skew / regional_mse: if regional_skew is given, ALSO fits
+        Pearson III and Log-Pearson III using the Bulletin 17B weighted-skew
+        procedure (regional_skew.py), as additional candidates alongside
+        their standard PWM fits -- both are then ranked side by side by
+        AIC/BIC/KS/AD, so the data (not an assumption) decides whether
+        incorporating regional skew actually improves the fit here.
+        regional_mse defaults to 0.302 (the Bulletin 17B national skew map's
+        documented MSE) but a region-specific study will usually be more
+        precise -- supply it explicitly if you have one.
         """
         methods = methods or {}
         plotting_positions = plotting_positions or {}
@@ -79,12 +169,23 @@ class FloodFrequencyAnalysis:
                 results[key] = self.fit(key, method=method, plotting_position=pp)
             except Exception as e:  # pragma: no cover - defensive
                 results[key] = e
+
+        if regional_skew is not None:
+            for key in ("pearson3", "logpearson3"):
+                try:
+                    results[f"{key}_weighted_skew"] = self.fit(
+                        key, method="mom_weighted_skew",
+                        regional_skew=regional_skew, regional_mse=regional_mse)
+                except Exception as e:  # pragma: no cover - defensive
+                    results[f"{key}_weighted_skew"] = e
+
         return results
 
     # ------------------------------------------------------------------ #
     def goodness_of_fit_table(self) -> pd.DataFrame:
         """
-        AIC / BIC / KS statistic for every distribution fitted so far.
+        AIC / BIC / KS statistic / Anderson-Darling statistic for every
+        distribution fitted so far.
 
         NOTE: the "plotting_position" column records which formula was
         *requested* for PWM fits, for traceability with the rest of the
@@ -93,6 +194,12 @@ class FloodFrequencyAnalysis:
         estimator (see distributions.fit() for why). The plotting-position
         choice does affect where empirical points are placed on probability
         plots and the separate descriptive-statistics summary.
+
+        AD_stat (Anderson-Darling) is tail-weighted, unlike KS which weights
+        all parts of the distribution equally -- more relevant for flood
+        design values, which live in the tail. It has no p-value here (see
+        FitResult.anderson_darling_statistic); use it as a relative ranking
+        criterion, lower is better.
         """
         rows = []
         for (key, method), r in self.fits.items():
@@ -102,6 +209,10 @@ class FloodFrequencyAnalysis:
                 ks_d, ks_p = r.ks_statistic(self.data)
             except Exception:
                 ks_d, ks_p = np.nan, np.nan
+            try:
+                ad_stat = r.anderson_darling_statistic(self.data)
+            except Exception:
+                ad_stat = np.nan
             rows.append({
                 "distribution": DISTRIBUTIONS[key]["label"],
                 "key": key, "method": method,
@@ -111,6 +222,8 @@ class FloodFrequencyAnalysis:
                 "AIC": r.aic(self.data),
                 "BIC": r.bic(self.data),
                 "KS_stat": ks_d, "KS_pvalue": ks_p,
+                "AD_stat": ad_stat,
+                "fit_assessment": _fit_assessment(ks_p),
             })
         df = pd.DataFrame(rows).sort_values("AIC").reset_index(drop=True)
         return df
@@ -122,6 +235,63 @@ class FloodFrequencyAnalysis:
             raise RuntimeError("No distributions have been fitted yet. Call fit_all() first.")
         best_row = table.sort_values(criterion).iloc[0]
         return best_row["key"], best_row["method"]
+
+    # ------------------------------------------------------------------ #
+    def akaike_weights(self, criterion: str = "AIC") -> pd.DataFrame:
+        """
+        Akaike weights (Burnham & Anderson, 2002) for every distribution
+        fitted so far: w_i = exp(-Delta_i/2) / sum_j exp(-Delta_j/2), where
+        Delta_i = AIC_i - min(AIC). Each w_i is interpretable as the
+        (approximate) probability that distribution i is the best model
+        among the candidate set, given the data -- the basis for
+        model-averaged quantiles rather than betting everything on a
+        single AIC "winner".
+        """
+        table = self.goodness_of_fit_table()
+        if table.empty:
+            raise RuntimeError("No distributions have been fitted yet. Call fit_all() first.")
+        delta = table[criterion] - table[criterion].min()
+        w = np.exp(-delta / 2)
+        w = w / w.sum()
+        out = table[["distribution", "key", "method", criterion]].copy()
+        out["delta"] = delta
+        out["akaike_weight"] = w
+        out["weight_assessment"] = out["akaike_weight"].apply(_weight_assessment)
+        return out.sort_values("akaike_weight", ascending=False).reset_index(drop=True)
+
+    def model_averaged_quantile_table(self, return_periods=(2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000),
+                                       criterion: str = "AIC") -> pd.DataFrame:
+        """
+        Akaike-weighted multi-model-averaged design flood: at each return
+        period, the weighted average of every fitted distribution's
+        quantile, weighted by Akaike weight. Also reports the weighted
+        between-model standard deviation (how much the candidates disagree,
+        weighted by how plausible each one is) -- a measure of *model-
+        selection* uncertainty, distinct from (and complementary to) the
+        within-model sampling uncertainty captured by bootstrap_ci().
+        """
+        weights_table = self.akaike_weights(criterion=criterion)
+        return_periods = np.asarray(return_periods, dtype=float)
+
+        rows = []
+        for T in return_periods:
+            q_vals, w_vals = [], []
+            for _, row in weights_table.iterrows():
+                r = self.fits.get((row["key"], row["method"]))
+                if r is None:
+                    continue
+                q_vals.append(float(r.quantile(T)))
+                w_vals.append(row["akaike_weight"])
+            q_vals = np.asarray(q_vals)
+            w_vals = np.asarray(w_vals)
+            w_vals = w_vals / w_vals.sum()  # renormalize in case any fit failed
+            q_avg = float(np.sum(w_vals * q_vals))
+            between_model_sd = float(np.sqrt(np.sum(w_vals * (q_vals - q_avg) ** 2)))
+            relative_spread_pct = 100 * between_model_sd / q_avg if q_avg else np.nan
+            rows.append({"T": T, "Q_model_averaged": q_avg, "between_model_sd": between_model_sd,
+                        "relative_spread_pct": relative_spread_pct,
+                        "agreement_assessment": _agreement_assessment(relative_spread_pct)})
+        return pd.DataFrame(rows)
 
     # ------------------------------------------------------------------ #
     def quantile_table(self, return_periods=(2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000),
@@ -232,9 +402,6 @@ class FloodFrequencyAnalysis:
             gap = float(runner_up[criterion] - best_row[criterion])
 
         ks_p = best_row["KS_pvalue"]
-        ks_note = ("no evidence against this fit (KS test)" if (pd.notna(ks_p) and ks_p > 0.05)
-                   else "the KS test flags some lack of fit — treat design values with extra caution"
-                   if pd.notna(ks_p) else "KS test could not be computed")
 
         q = self.fits[(best_key, best_method)].quantile(np.asarray(return_periods, dtype=float))
         ci = self.bootstrap_ci(best_key, best_method, return_periods,
@@ -250,6 +417,62 @@ class FloodFrequencyAnalysis:
         lines.append(f"Mean = {stats['mean']:.2f}   Std = {stats['std']:.2f}   "
                       f"CV = {stats['CV']:.3f}   CS (skew) = {stats['CS']:.3f}   CK (kurtosis) = {stats['CK']:.3f}")
         lines.append("")
+
+        lines.append("-" * 70)
+        lines.append("DATA QUALITY CHECKS")
+        lines.append("-" * 70)
+        dqr = self.data_quality()
+        if dqr["validation_warnings"]:
+            for w in dqr["validation_warnings"]:
+                lines.append(f"  ! {w}")
+        else:
+            lines.append("  No input-validation issues found (record length, missing/negative "
+                         "values, year sequence).")
+        mk = dqr["mann_kendall"]
+        lines.append(f"  Stationarity (Mann-Kendall trend test): {mk['trend']} "
+                     f"(Z = {mk['Z']:.2f}, p = {mk['p_value']:.3f})")
+        if mk["significant"]:
+            lines.append("    -> A significant trend means the i.i.d./stationarity assumption "
+                         "behind this whole analysis is questionable; consider a non-stationary "
+                         "method or investigate the cause (land use, climate, regulation changes).")
+        gr = dqr["grubbs"]
+        if gr["high_outlier_flagged"]:
+            lines.append(f"  Possible HIGH outlier flagged (Grubbs' test, log-space): "
+                         f"{gr['high_outlier_value']:.1f} (G = {gr['high_outlier_G']:.2f} > "
+                         f"critical {gr['G_critical']:.2f})")
+        if gr["low_outlier_flagged"]:
+            lines.append(f"  Possible LOW outlier flagged (Grubbs' test, log-space): "
+                         f"{gr['low_outlier_value']:.1f} (G = {gr['low_outlier_G']:.2f} > "
+                         f"critical {gr['G_critical']:.2f})")
+        if not gr["high_outlier_flagged"] and not gr["low_outlier_flagged"]:
+            lines.append(f"  No outliers flagged (Grubbs' test, log-space; critical G = "
+                         f"{gr['G_critical']:.2f}).")
+        lines.append("")
+
+        weighted_skew_fits = {k: r for k, r in self.fits.items()
+                              if r.method == "mom_weighted_skew" and r.regional_skew_info}
+        if weighted_skew_fits:
+            lines.append("-" * 70)
+            lines.append("REGIONAL SKEW (Bulletin 17B weighted skew)")
+            lines.append("-" * 70)
+            for (key, method), r in weighted_skew_fits.items():
+                info = r.regional_skew_info
+                lines.append(f"  {DISTRIBUTIONS[key]['label']}: station skew = {info['station_skew']:.3f} "
+                             f"(MSE = {info['station_mse']:.3f}), regional skew = {info['regional_skew']:.3f} "
+                             f"(MSE = {info['regional_mse']:.3f})")
+                lines.append(f"    -> weighted skew = {info['weighted_skew']:.3f}")
+                if info["review_flag"]:
+                    lines.append(f"    ! Warning: {info['review_flag']}")
+                else:
+                    lines.append(f"    Good: station and regional skew are reasonably consistent "
+                                 f"(within 0.5).")
+            lines.append("  Note: this is the classical Bulletin 17B weighted-skew procedure, not")
+            lines.append("  the full Bulletin 17C Expected Moments Algorithm (EMA). It is included")
+            lines.append("  as an additional candidate above/below, ranked alongside the standard")
+            lines.append("  PWM fits by AIC/BIC/KS/AD -- check whether it actually improved the fit")
+            lines.append("  rather than assuming it automatically does.")
+            lines.append("")
+
         lines.append(f"RECOMMENDED DISTRIBUTION: {DISTRIBUTIONS[best_key]['label']}  "
                       f"(fitted by {best_method.upper()}"
                       + (f", requested plotting position: {best_row['plotting_position']}" if best_row['plotting_position'] != "-" else "")
@@ -263,10 +486,15 @@ class FloodFrequencyAnalysis:
                           f"({runner_up['distribution']}, {runner_up['method'].upper()}): {verdict}")
         lines.append(f"  - KS statistic = {best_row['KS_stat']:.4f}"
                       + (f", p = {ks_p:.3f}" if pd.notna(ks_p) else "")
-                      + f" -> {ks_note}")
+                      + f" -> {_fit_assessment(ks_p)}")
+        weights_table_preview = self.akaike_weights(criterion=criterion)
+        top_weight = float(weights_table_preview["akaike_weight"].iloc[0])
+        lines.append(f"  - Confidence in this pick (Akaike weight = {top_weight:.0%} among "
+                     f"{len(table)} candidates): {_confidence_assessment(top_weight)}")
         lines.append("")
         lines.append("Top candidates (ranked):")
-        cols = ["distribution", "method", "plotting_position", "AIC", "BIC", "KS_stat", "KS_pvalue"]
+        cols = ["distribution", "method", "plotting_position", "AIC", "BIC", "KS_stat", "KS_pvalue",
+                "AD_stat", "fit_assessment"]
         lines.append(table[cols].head(5).round(3).to_string(index=False))
         lines.append("")
         lines.append(f"Design flood estimates — {DISTRIBUTIONS[best_key]['label']} "
@@ -293,6 +521,30 @@ class FloodFrequencyAnalysis:
         })
         lines.append(design_df.to_string(index=False))
         lines.append("")
+
+        lines.append("-" * 70)
+        lines.append("MODEL-AVERAGED DESIGN FLOOD (Akaike-weighted across all fitted distributions)")
+        lines.append("-" * 70)
+        lines.append("Rather than betting entirely on the single AIC-best distribution above, this")
+        lines.append("blends every fitted distribution's quantile, weighted by its Akaike weight")
+        lines.append("(~ the probability it is the best model among the candidates). "
+                     "'between_model_sd'")
+        lines.append("is how much the candidates disagree at that T, weighted by plausibility -- a")
+        lines.append("model-selection-uncertainty companion to the bootstrap CI above (which only")
+        lines.append("captures sampling uncertainty within a single chosen model).")
+        weights_table = self.akaike_weights(criterion=criterion)
+        lines.append("")
+        lines.append("Akaike weights:")
+        lines.append(weights_table[["distribution", "method", "akaike_weight", "weight_assessment"]]
+                     .round(3).to_string(index=False))
+        ma_table = self.model_averaged_quantile_table(return_periods=return_periods, criterion=criterion)
+        lines.append("")
+        lines.append(ma_table.rename(columns={"T": "T (years)"}).round(1).to_string(index=False))
+        lines.append("")
+        lines.append("(Good = models agree closely; Caution = moderate disagreement; "
+                     "Warning = substantial disagreement -- read the design value with that in mind.)")
+        lines.append("")
+
         lines.append("Notes:")
         lines.append("  - Ranking is based on AIC/BIC (penalized log-likelihood) plus a")
         lines.append("    Kolmogorov-Smirnov goodness-of-fit check; it does not replace engineering")

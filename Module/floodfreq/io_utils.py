@@ -71,16 +71,32 @@ def read_series(path, value_col=None, year_col=None, sheet_name=0):
     flood series, and a column that looks like a 4-digit year is used as
     the year index if present.
     """
-    path = str(path)
-    if path.lower().endswith((".csv",)):
-        df = pd.read_csv(path)
+    path_str = str(path)
+    if not Path(path_str).exists():
+        raise FileNotFoundError(f"Input file not found: {path_str}")
+
+    if path_str.lower().endswith((".csv",)):
+        df = pd.read_csv(path_str)
     else:
-        df = pd.read_excel(path, sheet_name=sheet_name)
+        df = pd.read_excel(path_str, sheet_name=sheet_name)
+
+    if df.empty or df.shape[1] == 0:
+        raise ValueError(f"{path_str} was read successfully but contains no data "
+                          f"(no rows or no columns). Check the file isn't empty or "
+                          f"malformed.")
+
+    if value_col is not None and value_col not in df.columns:
+        raise ValueError(f"value_col='{value_col}' not found in {path_str}. "
+                          f"Available columns: {list(df.columns)}")
+    if year_col is not None and year_col not in df.columns:
+        raise ValueError(f"year_col='{year_col}' not found in {path_str}. "
+                          f"Available columns: {list(df.columns)}")
 
     if value_col is None:
         numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
         if not numeric_cols:
-            raise ValueError("No numeric column found; pass value_col explicitly.")
+            raise ValueError(f"No numeric column found in {path_str}; pass value_col "
+                              f"explicitly. Available columns: {list(df.columns)}")
         # prefer a column that is NOT a plausible year column
         candidates = [c for c in numeric_cols
                       if not (df[c].between(1800, 2100).mean() > 0.9)]
@@ -93,7 +109,13 @@ def read_series(path, value_col=None, year_col=None, sheet_name=0):
                 break
 
     sub = df[[year_col, value_col]] if year_col else df[[value_col]]
+    n_before = len(sub)
     sub = sub.dropna()
+    if sub.empty:
+        raise ValueError(f"After dropping missing values, no data remains from column "
+                          f"'{value_col}' in {path_str} (started with {n_before} row(s)). "
+                          f"Check that column actually contains the flood series.")
+
     values = sub[value_col].to_numpy(dtype=float)
     years = sub[year_col].to_numpy() if year_col else None
     return values, years

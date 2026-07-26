@@ -33,6 +33,7 @@ class FitResult:
         self.n = n
         self.transform = transform  # None, "log10", or "ln"
         self.plotting_position = plotting_position  # only meaningful when method == "pwm"
+        self.regional_skew_info = None  # populated externally for method == "mom_weighted_skew"
         self.spec = DISTRIBUTIONS[key]
         self.k = len(self.params)  # number of fitted parameters
 
@@ -110,6 +111,37 @@ class FitResult:
             data = np.log(data)
         d, p = ss.kstest(data, self._frozen().cdf)
         return d, p
+
+    def anderson_darling_statistic(self, data):
+        """
+        General Anderson-Darling A^2 statistic (Anderson & Darling, 1954),
+        computed via the probability integral transform against this
+        distribution's own fitted CDF:
+
+            A^2 = -n - (1/n) * sum_i (2i-1) * [ln F(x_(i)) + ln(1 - F(x_(n+1-i)))]
+
+        More sensitive to tail discrepancies than the Kolmogorov-Smirnov
+        statistic, which weights all parts of the distribution equally --
+        relevant here since flood design values live in the tail.
+
+        NOTE: unlike ks_statistic(), this does NOT return a p-value. Formal
+        Anderson-Darling critical values are distribution-specific and were
+        derived assuming known (not estimated) parameters; the standard
+        corrections for estimated parameters (Stephens, 1974) only cover a
+        handful of distributions (normal, exponential, Weibull, etc.), not
+        the full set used here (GEV, Pearson III, ...). A^2 is therefore
+        reported as an additional *relative* ranking criterion alongside
+        AIC/BIC/KS -- lower is better -- not as a formal hypothesis test.
+        """
+        data = np.sort(np.asarray(data, dtype=float))
+        n = data.size
+        F = self.cdf(data)
+        eps = 1e-12
+        F = np.clip(F, eps, 1 - eps)
+        i = np.arange(1, n + 1)
+        S = np.sum((2 * i - 1) * (np.log(F) + np.log(1 - F[::-1])))
+        A2 = -n - S / n
+        return float(A2)
 
     def __repr__(self):
         return (f"<FitResult {self.spec['label']} method={self.method} "
@@ -235,11 +267,16 @@ def available_distributions():
     return {k: v["label"] for k, v in DISTRIBUTIONS.items()}
 
 
-def fit(key: str, data: np.ndarray, method: str = "pwm", plotting_position="weibull") -> FitResult:
+def fit(key: str, data: np.ndarray, method: str = "pwm", plotting_position="weibull",
+        regional_skew: float = None, regional_mse: float = 0.302) -> FitResult:
     """
     Fit a distribution to a 1-D array of annual maxima.
 
-    method: "mom", "mle", or "pwm"
+    method: "mom", "mle", "pwm", or "mom_weighted_skew" (Pearson III /
+        Log-Pearson III only -- see regional_skew.py). regional_skew and
+        regional_mse are only used by "mom_weighted_skew"; regional_skew
+        MUST be supplied by the caller (there is no sensible default --
+        it has to come from a published regional study for your area).
     plotting_position: only used by "pwm" (which empirical-frequency formula
         weights the sample probability-weighted moments).
     """
@@ -250,10 +287,25 @@ def fit(key: str, data: np.ndarray, method: str = "pwm", plotting_position="weib
     xt = _transform_data(x, transform)
 
     method = method.lower()
+    regional_skew_info = None
+
     if method == "mom":
         if spec["fit_mom"] is None:
             raise ValueError(f"Method of moments is not available for '{key}'.")
         params = spec["fit_mom"](xt)
+
+    elif method == "mom_weighted_skew":
+        if key not in ("pearson3", "logpearson3"):
+            raise ValueError("'mom_weighted_skew' is only defined for pearson3/logpearson3 "
+                              "(it operates on the skew parameter of a Pearson-family fit).")
+        if regional_skew is None:
+            raise ValueError("regional_skew must be supplied for method='mom_weighted_skew' "
+                              "-- it comes from a published regional study for your area, "
+                              "not something this tool can determine on its own.")
+        from .regional_skew import weighted_skew
+        station_skew, mean, std = _mom_pearson3(xt)
+        regional_skew_info = weighted_skew(station_skew, n, regional_skew, regional_mse)
+        params = (regional_skew_info["weighted_skew"], mean, std)
 
     elif method == "mle":
         scipy_obj = spec["scipy_obj"]
@@ -303,7 +355,10 @@ def fit(key: str, data: np.ndarray, method: str = "pwm", plotting_position="weib
         params = tuple(d.values())
 
     else:
-        raise ValueError(f"Unknown fitting method '{method}'. Use 'mom', 'mle', or 'pwm'.")
+        raise ValueError(f"Unknown fitting method '{method}'. "
+                          f"Use 'mom', 'mle', 'pwm', or 'mom_weighted_skew'.")
 
-    return FitResult(key, method, params, n, transform=transform,
-                      plotting_position=plotting_position if method == "pwm" else None)
+    result = FitResult(key, method, params, n, transform=transform,
+                        plotting_position=plotting_position if method == "pwm" else None)
+    result.regional_skew_info = regional_skew_info
+    return result

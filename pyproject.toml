@@ -39,3 +39,8 @@ dependencies = [
 # Without this, `uv sync`/`uv add` fail with a hatchling "no file selection
 # defined" error, since there's no actual package for it to build a wheel from.
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

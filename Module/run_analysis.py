@@ -21,6 +21,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 from floodfreq.analysis import FloodFrequencyAnalysis
 from floodfreq.distributions import DISTRIBUTIONS
 from floodfreq.io_utils import read_series, resolve_case, write_report, project_root_from
@@ -29,6 +31,9 @@ from floodfreq.plots import (
     save_quantile_ci_plot,
     save_moment_ratio_diagram,
     save_data_histogram,
+    save_data_quality_plot,
+    save_dashboard,
+    save_pdf_report,
 )
 
 DEFAULT_RETURN_PERIODS = [2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
@@ -120,6 +125,16 @@ def parse_args():
                    help="Plotting-position formula used ONLY for the general descriptive "
                         "statistics (Stat-sheet-style moments/PWM), independent of the "
                         "per-distribution fitting choice above (default: weibull)")
+    p.add_argument("--regional-skew", type=float, default=None,
+                   help="Regional skew value for Pearson III / Log-Pearson III (Bulletin 17B "
+                        "weighted-skew procedure). Must come from a published regional study "
+                        "for your area -- there is no sensible default. If given, adds "
+                        "weighted-skew variants of Pearson III/LP3 as additional candidates "
+                        "alongside their standard PWM fits.")
+    p.add_argument("--regional-skew-mse", type=float, default=0.302,
+                   help="Mean square error of --regional-skew (default: 0.302, the documented "
+                        "MSE of the Bulletin 17B national skew map -- prefer a region/state-"
+                        "specific study's MSE if you have one, it will usually be smaller/better).")
     p.add_argument("--n-boot", type=int, default=1000, help="Bootstrap resamples for the CI plot (default: 1000)")
     p.add_argument("--confidence-level", type=float, default=None,
                    help="Confidence level for the design-flood interval, in percent "
@@ -127,6 +142,10 @@ def parse_args():
     p.add_argument("--no-plots", action="store_true", help="Skip PNG plot generation")
     p.add_argument("--xlsx-report", action="store_true",
                    help="Also write a formatted .xlsx report to Output/<CaseName>/ (in addition to the CSVs)")
+    p.add_argument("--pdf-report", action="store_true",
+                   help="Also write a single bundled .pdf report (text summary + dashboard + all "
+                        "individual plots) to Output/<CaseName>/ -- the one file to hand to a "
+                        "colleague instead of the separate CSVs/PNGs.")
     return p.parse_args()
 
 
@@ -151,12 +170,68 @@ def main():
     print(f"Plot dir:    {paths.plot_dir}")
     print()
 
-    values, years = read_series(paths.data_csv, value_col=args.value_col, year_col=args.year_col)
+    try:
+        values, years = read_series(paths.data_csv, value_col=args.value_col, year_col=args.year_col)
+    except (FileNotFoundError, ValueError) as e:
+        sys.exit(f"ERROR reading input data: {e}")
     print(f"Loaded {len(values)} annual maxima"
           f"{f' ({years.min()}-{years.max()})' if years is not None else ''}.")
 
-    ffa = FloodFrequencyAnalysis(values, station_id=case_name, years=years)
-    ffa.fit_all(plotting_position=args.plotting_position)  # None -> per-distribution recommendations
+    try:
+        ffa = FloodFrequencyAnalysis(values, station_id=case_name, years=years)
+    except ValueError as e:
+        sys.exit(f"ERROR: {e}")
+
+    # ---- Data quality checks (before fitting, so issues are visible early) ----
+    dqr = ffa.data_quality()
+    if dqr["validation_warnings"]:
+        print("\nData quality warnings:")
+        for w in dqr["validation_warnings"]:
+            print(f"  ! {w}")
+    mk = dqr["mann_kendall"]
+    print(f"Stationarity check: {mk['trend']} (p = {mk['p_value']:.3f})")
+    if mk["significant"]:
+        print("  -> significant trend detected: the stationarity assumption behind this "
+              "analysis is questionable; see summary.txt for details.")
+    gr = dqr["grubbs"]
+    if gr["high_outlier_flagged"] or gr["low_outlier_flagged"]:
+        print("  -> possible outlier(s) flagged (Grubbs' test); see summary.txt for details.")
+
+    dq_rows = [
+        {"check": "n_records", "value": ffa.n,
+         "meaning": f"You have {ffa.n} years of data in this record."},
+        {"check": "validation_warnings",
+         "value": " | ".join(dqr["validation_warnings"]) or "none",
+         "meaning": "No input-quality issues found." if not dqr["validation_warnings"]
+                    else "See the value column for details; worth a quick manual check "
+                         "of the raw data before trusting the analysis."},
+        {"check": "mann_kendall_trend", "value": mk["trend"],
+         "meaning": ("No evidence that flood magnitudes are systematically increasing or "
+                     "decreasing over time; the record looks stationary.")
+                    if not mk["significant"] else
+                    ("A statistically significant trend was detected — the assumption that "
+                     "flood risk is constant through time may not hold here, which affects "
+                     "how much to trust the fitted distribution and its extrapolation.")},
+        {"check": "mann_kendall_p_value", "value": round(mk["p_value"], 4),
+         "meaning": f"p={mk['p_value']:.3f}; a value below 0.05 would indicate a statistically "
+                    f"significant trend. This is {'above' if mk['p_value'] >= 0.05 else 'below'} "
+                    f"that threshold."},
+        {"check": "grubbs_high_outlier_value", "value": gr["high_outlier_value"],
+         "meaning": "The single largest value in the record."},
+        {"check": "grubbs_high_outlier_flagged", "value": gr["high_outlier_flagged"],
+         "meaning": "Good: this value is NOT considered a statistical outlier." if not gr["high_outlier_flagged"]
+                    else "Warning: this value IS flagged as a possible outlier — worth checking "
+                         "whether it's a data error or a genuine extreme event."},
+        {"check": "grubbs_low_outlier_value", "value": gr["low_outlier_value"],
+         "meaning": "The single smallest value in the record."},
+        {"check": "grubbs_low_outlier_flagged", "value": gr["low_outlier_flagged"],
+         "meaning": "Good: this value is NOT considered a statistical outlier." if not gr["low_outlier_flagged"]
+                    else "Warning: this value IS flagged as a possible outlier — worth checking "
+                         "whether it's a data error or a genuine extreme event."},
+    ]
+    pd.DataFrame(dq_rows).to_csv(paths.output_dir / "data_quality.csv", index=False)
+    ffa.fit_all(plotting_position=args.plotting_position,  # None -> per-distribution recommendations
+                regional_skew=args.regional_skew, regional_mse=args.regional_skew_mse)
 
     confidence_level = args.confidence_level
     if confidence_level is None:
@@ -167,7 +242,6 @@ def main():
 
     # ---- CSV outputs ----
     stats = ffa.descriptive_stats(plotting_position=args.descriptive_plotting_position)
-    import pandas as pd
     pd.Series(stats, name="value").rename_axis("statistic").reset_index().to_csv(
         paths.output_dir / "descriptive_stats.csv", index=False)
 
@@ -176,6 +250,10 @@ def main():
 
     q_table = ffa.quantile_table(return_periods=DEFAULT_RETURN_PERIODS)
     q_table.to_csv(paths.output_dir / "quantile_table.csv", index=False)
+
+    ffa.akaike_weights().to_csv(paths.output_dir / "akaike_weights.csv", index=False)
+    ffa.model_averaged_quantile_table(return_periods=DEFAULT_RETURN_PERIODS).to_csv(
+        paths.output_dir / "model_averaged_quantiles.csv", index=False)
 
     best_key, best_method = ffa.best_fit(criterion="AIC")
 
@@ -199,8 +277,15 @@ def main():
         write_report(report_path, ffa, return_periods=DEFAULT_RETURN_PERIODS)
         print(f"Excel report written to {report_path}")
 
+    if args.pdf_report:
+        pdf_path = paths.output_dir / f"{case_name}_report.pdf"
+        save_pdf_report(ffa, pdf_path, best_key, best_method, recommendation,
+                         n_boot=args.n_boot, alpha=alpha)
+        print(f"PDF report written to {pdf_path}")
+
     # ---- Plots ----
     if not args.no_plots:
+        save_data_quality_plot(ffa, paths.plot_dir / "data_quality_timeseries.png")
         save_data_histogram(ffa, paths.plot_dir / "input_data_histogram.png",
                              dist_key=best_key, method=best_method)
         save_probability_plot(ffa, paths.plot_dir / "flood_frequency_curve.png")
@@ -208,6 +293,8 @@ def main():
         save_quantile_ci_plot(ffa, best_key, best_method,
                                paths.plot_dir / f"bestfit_{best_key}_ci.png",
                                n_boot=args.n_boot, alpha=alpha)
+        save_dashboard(ffa, paths.plot_dir / "dashboard.png",
+                        best_key, best_method, n_boot=args.n_boot, alpha=alpha)
         print(f"PNG plots written to {paths.plot_dir}")
 
     print("\nDone.")
