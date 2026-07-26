@@ -19,13 +19,16 @@ Usage:
 from __future__ import annotations
 import argparse
 import sys
+import datetime
+import platform
 from pathlib import Path
 
 import pandas as pd
 
+import floodfreq
 from floodfreq.analysis import FloodFrequencyAnalysis
 from floodfreq.distributions import DISTRIBUTIONS
-from floodfreq.io_utils import read_series, resolve_case, write_report, project_root_from
+from floodfreq.io_utils import read_series, resolve_case, write_report, project_root_from, load_case_config
 from floodfreq.plots import (
     save_probability_plot,
     save_quantile_ci_plot,
@@ -37,6 +40,31 @@ from floodfreq.plots import (
 )
 
 DEFAULT_RETURN_PERIODS = [2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
+
+
+def build_provenance_header(config_path: Path = None) -> str:
+    """
+    A short header stamping exactly how this run was produced: when, with
+    what command, and which tool version -- so a summary.txt or PDF found
+    later (or handed to someone else) is self-documenting instead of an
+    orphaned result with no record of the settings that produced it.
+    """
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    command = " ".join([Path(sys.argv[0]).name] + sys.argv[1:])
+    lines = [
+        "=" * 70,
+        "RUN PROVENANCE",
+        "=" * 70,
+        f"Generated:     {now}",
+        f"Tool version:  floodfreq {floodfreq.__version__}",
+        f"Command:       python {command}",
+        f"Python:        {platform.python_version()}",
+    ]
+    if config_path is not None:
+        lines.append(f"Config file:   {config_path} (CLI flags, if any, override its settings)")
+    lines.append("=" * 70)
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _csv_hint(path: Path) -> str:
@@ -87,6 +115,30 @@ def prompt_case_name(project_root: Path) -> str:
         print(f"  Not a valid choice. Enter a number 1-{len(csvs)}, or an exact case name.")
 
 
+def resolve_setting(cli_value, config: dict, key: str, hardcoded_default):
+    """
+    Precedence: an explicit CLI flag wins, then the per-case Data/<CaseName>.toml
+    config file, then the hardcoded default. `cli_value` must be None when the
+    flag wasn't passed on the command line (all mergeable CLI flags default to
+    None for exactly this reason).
+    """
+    if cli_value is not None:
+        return cli_value
+    if key in config:
+        return config[key]
+    return hardcoded_default
+
+
+def resolve_bool_setting(cli_flag: bool, config: dict, key: str) -> bool:
+    """
+    For store_true CLI flags: True if EITHER the CLI flag was passed OR the
+    config file sets it. There's no way to force a config-file `true` back to
+    False from the CLI with a plain store_true flag -- edit the .toml file
+    directly if you need to turn it off for one run.
+    """
+    return bool(cli_flag) or bool(config.get(key, False))
+
+
 def prompt_confidence_level(default=95.0) -> float:
     """Interactively ask the user for a confidence level (in percent),
     re-prompting on invalid input. Used when --confidence-level isn't passed."""
@@ -120,7 +172,7 @@ def parse_args():
                         "recommended formula — Blom for Normal/LogNormal, Gringorten for the rest). "
                         "NOTE: PWM parameter estimation always uses the standard unbiased L-moment "
                         "estimator regardless of this setting — see summary.txt for details.")
-    p.add_argument("--descriptive-plotting-position", default="weibull",
+    p.add_argument("--descriptive-plotting-position", default=None,
                    choices=["weibull", "hazen", "cunnane", "gringorten", "hosking", "blom"],
                    help="Plotting-position formula used ONLY for the general descriptive "
                         "statistics (Stat-sheet-style moments/PWM), independent of the "
@@ -131,11 +183,11 @@ def parse_args():
                         "for your area -- there is no sensible default. If given, adds "
                         "weighted-skew variants of Pearson III/LP3 as additional candidates "
                         "alongside their standard PWM fits.")
-    p.add_argument("--regional-skew-mse", type=float, default=0.302,
+    p.add_argument("--regional-skew-mse", type=float, default=None,
                    help="Mean square error of --regional-skew (default: 0.302, the documented "
                         "MSE of the Bulletin 17B national skew map -- prefer a region/state-"
                         "specific study's MSE if you have one, it will usually be smaller/better).")
-    p.add_argument("--n-boot", type=int, default=1000, help="Bootstrap resamples for the CI plot (default: 1000)")
+    p.add_argument("--n-boot", type=int, default=None, help="Bootstrap resamples for the CI plot (default: 1000)")
     p.add_argument("--confidence-level", type=float, default=None,
                    help="Confidence level for the design-flood interval, in percent "
                         "(e.g. 95 for a 95%% CI). If omitted, you'll be prompted interactively.")
@@ -163,6 +215,27 @@ def main():
     if not paths.data_csv.exists():
         sys.exit(f"ERROR: expected input file not found: {paths.data_csv}")
 
+    try:
+        config = load_case_config(case_name, paths.project_root)
+    except ValueError as e:
+        sys.exit(f"ERROR: {e}")
+    config_path = paths.project_root / "Data" / f"{case_name}.toml"
+    if config:
+        print(f"Using settings from {config_path} (CLI flags, if any, take precedence).")
+
+    value_col = resolve_setting(args.value_col, config, "value_col", None)
+    year_col = resolve_setting(args.year_col, config, "year_col", None)
+    plotting_position = resolve_setting(args.plotting_position, config, "plotting_position", None)
+    descriptive_plotting_position = resolve_setting(
+        args.descriptive_plotting_position, config, "descriptive_plotting_position", "weibull")
+    regional_skew = resolve_setting(args.regional_skew, config, "regional_skew", None)
+    regional_skew_mse = resolve_setting(args.regional_skew_mse, config, "regional_skew_mse", 0.302)
+    n_boot = resolve_setting(args.n_boot, config, "n_boot", 1000)
+    cli_confidence_level = resolve_setting(args.confidence_level, config, "confidence_level", None)
+    no_plots = resolve_bool_setting(args.no_plots, config, "no_plots")
+    xlsx_report = resolve_bool_setting(args.xlsx_report, config, "xlsx_report")
+    pdf_report = resolve_bool_setting(args.pdf_report, config, "pdf_report")
+
     print(f"Case:        {paths.case_name}")
     print(f"Project root:{paths.project_root}")
     print(f"Input data:  {paths.data_csv}")
@@ -171,7 +244,7 @@ def main():
     print()
 
     try:
-        values, years = read_series(paths.data_csv, value_col=args.value_col, year_col=args.year_col)
+        values, years = read_series(paths.data_csv, value_col=value_col, year_col=year_col)
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"ERROR reading input data: {e}")
     print(f"Loaded {len(values)} annual maxima"
@@ -230,10 +303,10 @@ def main():
                          "whether it's a data error or a genuine extreme event."},
     ]
     pd.DataFrame(dq_rows).to_csv(paths.output_dir / "data_quality.csv", index=False)
-    ffa.fit_all(plotting_position=args.plotting_position,  # None -> per-distribution recommendations
-                regional_skew=args.regional_skew, regional_mse=args.regional_skew_mse)
+    ffa.fit_all(plotting_position=plotting_position,  # None -> per-distribution recommendations
+                regional_skew=regional_skew, regional_mse=regional_skew_mse)
 
-    confidence_level = args.confidence_level
+    confidence_level = cli_confidence_level
     if confidence_level is None:
         confidence_level = prompt_confidence_level(default=95.0)
     elif not (0 < confidence_level < 100):
@@ -241,7 +314,7 @@ def main():
     print(f"Using a {confidence_level:g}% confidence interval.\n")
 
     # ---- CSV outputs ----
-    stats = ffa.descriptive_stats(plotting_position=args.descriptive_plotting_position)
+    stats = ffa.descriptive_stats(plotting_position=descriptive_plotting_position)
     pd.Series(stats, name="value").rename_axis("statistic").reset_index().to_csv(
         paths.output_dir / "descriptive_stats.csv", index=False)
 
@@ -261,7 +334,8 @@ def main():
     # This also runs the bootstrap CI once; we re-derive the CSV from ffa's cache-friendly call below.
     recommendation = ffa.generate_recommendation(
         return_periods=DEFAULT_RETURN_PERIODS, criterion="AIC",
-        confidence_level=confidence_level, ci_n_boot=args.n_boot, random_state=0)
+        confidence_level=confidence_level, ci_n_boot=n_boot, random_state=0)
+    recommendation = build_provenance_header(config_path if config else None) + "\n" + recommendation
     print("\n" + recommendation)
     summary_path = paths.output_dir / "summary.txt"
     summary_path.write_text(recommendation)
@@ -269,22 +343,22 @@ def main():
 
     alpha = 1.0 - confidence_level / 100.0
     ci_table = ffa.bootstrap_ci(best_key, best_method, DEFAULT_RETURN_PERIODS,
-                                 n_boot=args.n_boot, alpha=alpha, random_state=0)
+                                 n_boot=n_boot, alpha=alpha, random_state=0)
     ci_table.to_csv(paths.output_dir / f"bootstrap_ci_{best_key}.csv", index=False)
 
-    if args.xlsx_report:
+    if xlsx_report:
         report_path = paths.output_dir / f"{case_name}_report.xlsx"
         write_report(report_path, ffa, return_periods=DEFAULT_RETURN_PERIODS)
         print(f"Excel report written to {report_path}")
 
-    if args.pdf_report:
+    if pdf_report:
         pdf_path = paths.output_dir / f"{case_name}_report.pdf"
         save_pdf_report(ffa, pdf_path, best_key, best_method, recommendation,
-                         n_boot=args.n_boot, alpha=alpha)
+                         n_boot=n_boot, alpha=alpha)
         print(f"PDF report written to {pdf_path}")
 
     # ---- Plots ----
-    if not args.no_plots:
+    if not no_plots:
         save_data_quality_plot(ffa, paths.plot_dir / "data_quality_timeseries.png")
         save_data_histogram(ffa, paths.plot_dir / "input_data_histogram.png",
                              dist_key=best_key, method=best_method)
@@ -292,9 +366,9 @@ def main():
         save_moment_ratio_diagram(ffa, paths.plot_dir / "moment_ratio_diagram.png")
         save_quantile_ci_plot(ffa, best_key, best_method,
                                paths.plot_dir / f"bestfit_{best_key}_ci.png",
-                               n_boot=args.n_boot, alpha=alpha)
+                               n_boot=n_boot, alpha=alpha)
         save_dashboard(ffa, paths.plot_dir / "dashboard.png",
-                        best_key, best_method, n_boot=args.n_boot, alpha=alpha)
+                        best_key, best_method, n_boot=n_boot, alpha=alpha)
         print(f"PNG plots written to {paths.plot_dir}")
 
     print("\nDone.")

@@ -7,7 +7,7 @@
 
 [project]
 name = "flood-frequency-analysis"
-version = "0.1.0"
+version = "0.2.0"
 description = "Flood frequency analysis on annual-maximum inflow series: fits 9 candidate distributions (Normal, LogNormal 2p/3p, Gumbel, GEV, Exponential, Gamma, Pearson III, Log-Pearson III) via MOM/MLE/PWM, ranks them by AIC/BIC/KS, and reports a best-fit recommendation with bootstrap confidence intervals."
 requires-python = ">=3.11"
 dependencies = [
@@ -42,5 +42,15 @@ package = false
 
 [dependency-groups]
 dev = [
+    "pypdf>=6.14.2",
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+# Makes Module/ importable so tests can `from floodfreq import ...` no matter
+# where pytest is invoked from -- explicit here rather than relying solely on
+# tests/conftest.py's sys.path insertion, since a conftest.py in the wrong
+# place fails silently (ModuleNotFoundError, easy to mistake for something
+# else being wrong). This is a second, independent safety net for the same
+# problem conftest.py already solves.
+pythonpath = ["Module"]

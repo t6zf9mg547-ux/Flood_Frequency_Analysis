@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from floodfreq.io_utils import read_series
+from floodfreq.io_utils import read_series, load_case_config
 
 
 def test_reads_valid_csv(tmp_path):
@@ -52,3 +52,25 @@ def test_year_column_autodetected(tmp_path):
     values, years = read_series(p)
     assert years is not None
     assert years.min() == 1990
+
+
+# -- load_case_config -- #
+
+def test_load_case_config_missing_file_returns_empty(tmp_path):
+    (tmp_path / "Data").mkdir()
+    assert load_case_config("NoSuchCase", tmp_path) == {}
+
+
+def test_load_case_config_reads_valid_toml(tmp_path):
+    (tmp_path / "Data").mkdir()
+    (tmp_path / "Data" / "MyCase.toml").write_text(
+        'confidence_level = 90\nregional_skew = 0.0\npdf_report = true\n')
+    config = load_case_config("MyCase", tmp_path)
+    assert config == {"confidence_level": 90, "regional_skew": 0.0, "pdf_report": True}
+
+
+def test_load_case_config_malformed_toml_raises_clear_error(tmp_path):
+    (tmp_path / "Data").mkdir()
+    (tmp_path / "Data" / "Broken.toml").write_text("this is not valid toml {{{")
+    with pytest.raises(ValueError, match="Broken.toml"):
+        load_case_config("Broken", tmp_path)

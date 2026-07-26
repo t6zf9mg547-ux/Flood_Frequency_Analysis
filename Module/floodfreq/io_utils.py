@@ -17,6 +17,7 @@ of the calling script (pass `__file__` from a script living in Module/).
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
+import tomllib
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook
@@ -60,6 +61,30 @@ def resolve_case(case_name: str, module_file) -> CasePaths:
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_dir.mkdir(parents=True, exist_ok=True)
     return CasePaths(case_name, root, data_csv, output_dir, plot_dir)
+
+
+def load_case_config(case_name: str, project_root: Path) -> dict:
+    """
+    Read optional per-case settings from Data/<CaseName>.toml, if it exists.
+    Returns {} if the file doesn't exist (config is entirely optional; a
+    case with no .toml behaves exactly as it always has).
+
+    Recognized keys mirror run_analysis.py's CLI flag names (with dashes
+    replaced by underscores, as TOML keys can't contain dashes as bare
+    identifiers): value_col, year_col, plotting_position,
+    descriptive_plotting_position, n_boot, confidence_level, regional_skew,
+    regional_skew_mse, no_plots, xlsx_report, pdf_report. Unrecognized keys
+    are ignored (not an error), so a config file can be extended later
+    without breaking older runs of the tool against it.
+    """
+    config_path = project_root / "Data" / f"{case_name}.toml"
+    if not config_path.exists():
+        return {}
+    try:
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"Could not parse {config_path}: {e}") from e
 
 
 def read_series(path, value_col=None, year_col=None, sheet_name=0):

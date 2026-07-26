@@ -76,6 +76,22 @@ uv run python Module/run_analysis.py P1009 --no-plots
 
 `--pdf-report` bundles the text summary, the dashboard, and every individual full-size plot into one `Output/<CaseName>/<CaseName>_report.pdf` — the single file to actually hand to a colleague, instead of the separate CSVs/PNGs.
 
+## Per-case settings file (optional)
+
+Instead of retyping flags every time, save a case's settings in `Data/<CaseName>.toml`:
+```toml
+confidence_level = 90
+regional_skew = 0.0
+regional_skew_mse = 0.15
+n_boot = 2000
+pdf_report = true
+```
+Then `uv run python Module/run_analysis.py P1009` picks these up automatically — no flags needed. Any CLI flag you *do* pass still overrides the file for that one run (e.g. `--confidence-level 95` overrides the `90` above without touching the saved file). Recognized keys mirror the CLI flag names with underscores instead of dashes: `value_col`, `year_col`, `plotting_position`, `descriptive_plotting_position`, `n_boot`, `confidence_level`, `regional_skew`, `regional_skew_mse`, `no_plots`, `xlsx_report`, `pdf_report`.
+
+A case with no `.toml` file behaves exactly as before — this is entirely optional.
+
+**Note on git tracking:** `.gitignore` currently excludes everything under `Data/` (including `.toml` files), matching your instruction to keep `Data/`'s contents out of version control. If you'd rather have these small settings files tracked in git (they're not bulky/sensitive like the CSV data, and arguably worth sharing/preserving — "this is how station X should be analyzed"), that needs a small `.gitignore` change; let me know if you want that.
+
 Run `uv run python Module/run_analysis.py --help` for the full list.
 
 ## Default dependencies
