@@ -1,0 +1,67 @@
+Flood_Frequency_Analysis v0.4.4 -- dashboard rendering fixes
+======================================================================
+Small delta on top of v0.4.3. Only files changed since that delivery are
+included here. Extract on top of your project folder, overwriting when
+prompted. Nothing earlier needs to be reapplied -- these 4 files are the
+only ones that changed. No README changes this round (purely internal
+rendering fixes, no new CLI flags or outputs).
+
+WHAT WAS FIXED, BY REQUEST
+-----------------------------
+1. "The legend overlaps with the y-axis" (top-left growth curve panel):
+   The legend used matplotlib's automatic "best" placement, which was
+   landing right on top of the y-axis label and tick numbers. Moved to a
+   fixed loc="lower right" -- reliably empty, since at high T the curve
+   rises well above the data cloud. Verified with an actual bounding-box
+   overlap check (not just "looks fine"): legend vs. y-axis label/ticks,
+   confirmed False.
+
+2. "Not possible to read the station names due to overlapping" (L-moment
+   ratio diagram): station labels collide when stations cluster tightly
+   in (t3, t4) space -- which is exactly the case for a well-pooling,
+   homogeneous region, i.e. the case you most want to read clearly. Added
+   a small no-dependency staggering helper: labels are ordered by
+   L-kurtosis and given a monotonically increasing vertical offset,
+   alternating left/right of the point, connected back to the actual data
+   point with a thin leader line. Verified by isolating the text glyph
+   bounding boxes from the leader-line arrows (which inflate a naive bbox
+   check) and confirming zero pairwise overlaps.
+
+3. "Add the 10,000-year growth factor to the summary": done -- the
+   dashboard's text panel now lists T=10/100/1000/10,000-year growth
+   factors instead of just the first three.
+
+MODIFIED FILES
+--------------
+Module/floodfreq/plots.py          - regional_growth_curve_plot(): fixed
+                                      legend loc, shortened/shrunk ylabel
+                                    - NEW: _label_points_staggered() helper
+                                    - regional_moment_ratio_diagram(): uses
+                                      the new helper for station labels
+                                    - regional_dashboard(): growth-curve
+                                      legend override updated to match;
+                                      text panel now includes T=10,000y
+
+Module/floodfreq/__init__.py       Version bump 0.4.3 -> 0.4.4
+
+CHANGELOG.md                       New [0.4.4] entry.
+
+Module/tests/test_plots.py         3 new regression tests, each checking
+                                    the actual failure mode directly via
+                                    matplotlib bounding-box overlap tests
+                                    rather than just "does it render":
+                                      - legend vs. ylabel/ticks overlap
+                                      - station label vs. label overlap
+                                        (text-only, arrow excluded)
+                                      - 10,000y line present in the
+                                        dashboard text panel
+
+VERIFICATION
+------------
+All 172 tests pass:
+
+    uv run pytest Module/tests/ -v
+
+Try it:
+
+    uv run python Module/run_regional_analysis.py Piedmont

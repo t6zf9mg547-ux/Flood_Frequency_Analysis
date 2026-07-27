@@ -34,6 +34,22 @@ class CasePaths:
     plot_dir: Path
 
 
+@dataclass
+class RegionPaths:
+    """Standard path layout for one regional (pooled) analysis group:
+
+        <project_root>/
+            Data/Regional/<RegionName>/*.csv   - one file per station
+            Output/Regional/<RegionName>/      - CSV outputs for this region
+            Plot/Regional/<RegionName>/         - PNG plots for this region
+    """
+    region_name: str
+    project_root: Path
+    data_dir: Path
+    output_dir: Path
+    plot_dir: Path
+
+
 def project_root_from(module_file) -> Path:
     """
     Given __file__ of a script living directly under <project_root>/Module/,
@@ -61,6 +77,48 @@ def resolve_case(case_name: str, module_file) -> CasePaths:
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_dir.mkdir(parents=True, exist_ok=True)
     return CasePaths(case_name, root, data_csv, output_dir, plot_dir)
+
+
+def resolve_region(region_name: str, module_file) -> RegionPaths:
+    """
+    Resolve the standard Data/Regional/Output/Regional/Plot/Regional paths
+    for one regional (pooled) analysis group, and create
+    Output/Regional/<RegionName>/ and Plot/Regional/<RegionName>/ if they
+    don't exist yet.
+    """
+    root = project_root_from(module_file)
+    data_dir = root / "Data" / "Regional" / region_name
+    output_dir = root / "Output" / "Regional" / region_name
+    plot_dir = root / "Plot" / "Regional" / region_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    return RegionPaths(region_name, root, data_dir, output_dir, plot_dir)
+
+
+def load_region_stations(paths: RegionPaths, value_col=None, year_col=None) -> dict:
+    """
+    Read every station CSV in Data/Regional/<RegionName>/ into
+    {station_name: values_array, ...}, where station_name is the file's
+    stem (Data/Regional/<RegionName>/P1009.csv -> "P1009"). `.toml` files
+    in the same folder (if any are ever added) are ignored here -- unlike
+    single-station cases, regional stations don't currently support
+    per-station settings files.
+    """
+    if not paths.data_dir.is_dir():
+        raise FileNotFoundError(
+            f"Region data folder not found: {paths.data_dir}\n"
+            f"Create it and add one CSV per station, e.g. "
+            f"{paths.data_dir}/StationA.csv")
+    csvs = sorted(paths.data_dir.glob("*.csv"))
+    if not csvs:
+        raise ValueError(
+            f"No station CSVs found in {paths.data_dir}. Add at least 4 "
+            f"(one per station) to run a regional analysis.")
+    stations = {}
+    for f in csvs:
+        values, _years = read_series(f, value_col=value_col, year_col=year_col)
+        stations[f.stem] = values
+    return stations
 
 
 def load_case_config(case_name: str, project_root: Path) -> dict:
