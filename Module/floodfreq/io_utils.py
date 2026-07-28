@@ -95,14 +95,23 @@ def resolve_region(region_name: str, module_file) -> RegionPaths:
     return RegionPaths(region_name, root, data_dir, output_dir, plot_dir)
 
 
-def load_region_stations(paths: RegionPaths, value_col=None, year_col=None) -> dict:
+def load_region_stations(paths: RegionPaths, value_col=None, year_col=None):
     """
-    Read every station CSV in Data/Regional/<RegionName>/ into
-    {station_name: values_array, ...}, where station_name is the file's
-    stem (Data/Regional/<RegionName>/P1009.csv -> "P1009"). `.toml` files
-    in the same folder (if any are ever added) are ignored here -- unlike
-    single-station cases, regional stations don't currently support
-    per-station settings files.
+    Read every station CSV in Data/Regional/<RegionName>/ into two dicts
+    keyed by station name (the file's stem, e.g.
+    Data/Regional/<RegionName>/P1009.csv -> "P1009"):
+
+        station_data:  {station_name: values_array}
+        station_years: {station_name: years_array or None}
+
+    `station_years[name]` is None for any station CSV without a detectable
+    year column -- perfectly usable (data_quality/Mann-Kendall fall back to
+    record order as a stand-in for time, same as the single-station tool
+    does), but it does mean the "missing year" validation warning and
+    Sen's-slope-per-calendar-year magnitude aren't available for that
+    station. `.toml` files in the same folder (if any are ever added) are
+    ignored here -- unlike single-station cases, regional stations don't
+    currently support per-station settings files.
     """
     if not paths.data_dir.is_dir():
         raise FileNotFoundError(
@@ -114,11 +123,13 @@ def load_region_stations(paths: RegionPaths, value_col=None, year_col=None) -> d
         raise ValueError(
             f"No station CSVs found in {paths.data_dir}. Add at least 4 "
             f"(one per station) to run a regional analysis.")
-    stations = {}
+    station_data = {}
+    station_years = {}
     for f in csvs:
-        values, _years = read_series(f, value_col=value_col, year_col=year_col)
-        stations[f.stem] = values
-    return stations
+        values, years = read_series(f, value_col=value_col, year_col=year_col)
+        station_data[f.stem] = values
+        station_years[f.stem] = years
+    return station_data, station_years
 
 
 def load_case_config(case_name: str, project_root: Path) -> dict:

@@ -742,11 +742,11 @@ def save_station_design_flood_plot(result, station_name, path, max_T=10000, dpi=
 def save_regional_station_series_plot(result, path, ncols=3, dpi=150):
     """
     Small multiples: one panel per station, its raw annual-maximum series
-    plotted in observation order (regional station CSVs aren't required to
-    carry a year column the way single-station cases are, so this is
-    indexed 1..n rather than by calendar year) -- a quick visual screen
-    for anything unusual (a station with a wildly different range, an
-    obvious jump, a short/noisy record) before trusting the pooling.
+    plotted against calendar year when `result.station_years` has years
+    for that station (as returned by `io_utils.load_region_stations()`),
+    or against plain observation order (1..n) otherwise -- a quick visual
+    screen for anything unusual (a station with a wildly different range,
+    an obvious jump, a short/noisy record) before trusting the pooling.
     """
     n = len(result.stations)
     ncols = min(ncols, n)
@@ -755,10 +755,12 @@ def save_regional_station_series_plot(result, path, ncols=3, dpi=150):
     for i, s in enumerate(result.stations):
         ax = axes.flatten()[i]
         x = np.asarray(result.station_data[s.name], dtype=float)
-        ax.plot(np.arange(1, x.size + 1), x, "o-", ms=3, lw=1, color="steelblue")
+        years = result.station_years.get(s.name) if result.station_years else None
+        t = np.asarray(years, dtype=float) if years is not None else np.arange(1, x.size + 1)
+        ax.plot(t, x, "o-", ms=3, lw=1, color="steelblue")
         ax.axhline(s.mean, color="gray", ls="--", lw=1)
         ax.set_title(s.name, fontsize=9)
-        ax.set_xlabel("Observation #", fontsize=8)
+        ax.set_xlabel("Year" if years is not None else "Observation #", fontsize=8)
         ax.tick_params(labelsize=7)
         ax.grid(True, alpha=0.3)
     for j in range(len(result.stations), nrows * ncols):

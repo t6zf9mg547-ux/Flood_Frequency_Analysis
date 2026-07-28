@@ -159,6 +159,14 @@ def build_summary_text(result, provenance: str, ci_df=None, confidence_level: fl
                 if row["grubbs_low_outlier_flagged"]:
                     which.append(f"low={row['grubbs_low_outlier_value']:.1f}")
                 lines.append(f"  - {row['station']}: {', '.join(which)}")
+    n_no_years = int((~dq["years_available"]).sum())
+    if n_no_years:
+        lines.append("")
+        lines.append(f"Note: {n_no_years} of {len(dq)} station(s) had no detectable year column in "
+                      f"their CSV, so the trend test and Sen's slope above use record order as a "
+                      f"stand-in for calendar time for those stations (trend significance is "
+                      f"unaffected; Sen's slope units and the missing-year check are not available "
+                      f"without real years).")
     lines.append("")
     lines.append(dq.to_string(index=False))
     lines.append("")
@@ -304,12 +312,15 @@ def main():
     print()
 
     try:
-        station_data = load_region_stations(paths, value_col=args.value_col, year_col=args.year_col)
+        station_data, station_years = load_region_stations(
+            paths, value_col=args.value_col, year_col=args.year_col)
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"ERROR reading regional station data: {e}")
     print(f"Loaded {len(station_data)} station(s): {', '.join(station_data)}")
     for name, values in station_data.items():
-        print(f"  {name}: n={len(values)}, mean={values.mean():.1f}")
+        years = station_years.get(name)
+        year_note = f", years {int(years.min())}-{int(years.max())}" if years is not None else ", no year column detected"
+        print(f"  {name}: n={len(values)}, mean={values.mean():.1f}{year_note}")
     print()
 
     candidates = tuple(args.candidates) if args.candidates else ("glo", "gev", "gno", "pe3", "gpa")
@@ -319,7 +330,7 @@ def main():
         result = run_regional_analysis(
             region_name, station_data, candidates=candidates,
             n_sim=args.n_sim, seed=args.seed, return_periods=return_periods,
-            family=args.family)
+            family=args.family, station_years=station_years)
     except ValueError as e:
         sys.exit(f"ERROR: {e}")
 

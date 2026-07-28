@@ -339,6 +339,40 @@ def test_station_data_quality_flags_planted_trend():
     assert "increasing" in row["mann_kendall_trend"]
 
 
+def test_station_data_quality_years_available_defaults_false():
+    stations = [R.station_lmoments("S", np.arange(1, 21, dtype=float))]
+    df = R.station_data_quality(stations, {"S": np.arange(1, 21, dtype=float)})
+    assert not df.iloc[0]["years_available"]
+
+
+def test_station_data_quality_uses_years_when_given():
+    rng = np.random.default_rng(1)
+    n = 40
+    x = 100 + 2 * np.arange(n) + rng.normal(0, 1, n)
+    years = np.arange(1980, 1980 + n)
+    stations = [R.station_lmoments("S", x)]
+    df = R.station_data_quality(stations, {"S": x}, station_years={"S": years})
+    row = df.iloc[0]
+    assert row["years_available"]
+    # Sen's slope should be reported per calendar year (~2/year here), not
+    # per index step (which happens to be the same in this constructed
+    # example since years are consecutive -- the real point is that this
+    # path runs without error and the flag is set correctly)
+    assert row["sens_slope_per_year"] == pytest.approx(2.0, abs=0.5)
+
+
+def test_station_data_quality_mixed_years_availability():
+    """Some stations have years, some don't -- station_years may have a
+    None entry or simply omit a station."""
+    stations = [R.station_lmoments("WITH_YEARS", np.arange(1, 21, dtype=float)),
+                R.station_lmoments("NO_YEARS", np.arange(1, 21, dtype=float))]
+    data = {"WITH_YEARS": np.arange(1, 21, dtype=float), "NO_YEARS": np.arange(1, 21, dtype=float)}
+    years = {"WITH_YEARS": np.arange(2000, 2020), "NO_YEARS": None}
+    df = R.station_data_quality(stations, data, station_years=years).set_index("station")
+    assert df.loc["WITH_YEARS", "years_available"]
+    assert not df.loc["NO_YEARS", "years_available"]
+
+
 def test_run_regional_analysis_includes_data_quality(homogeneous_region):
     data, _ = homogeneous_region
     result = R.run_regional_analysis("TestRegion", data, n_sim=100, seed=5)

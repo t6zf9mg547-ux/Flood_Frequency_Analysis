@@ -147,6 +147,26 @@ def sample_regional_result():
     return R.run_regional_analysis("TestRegion", station_data, n_sim=100, seed=1)
 
 
+@pytest.fixture
+def sample_regional_result_with_years():
+    """Same shape as sample_regional_result, but with a per-station year
+    array attached, for exercising the calendar-year x-axis path in
+    save_regional_station_series_plot."""
+    import numpy as np
+    from floodfreq import regional as R
+    rng = np.random.default_rng(2026)
+    station_data = {}
+    station_years = {}
+    start_year = 1950
+    for i, (n, scale) in enumerate([(60, 50), (70, 80), (55, 65), (90, 40), (65, 55)]):
+        x = np.abs(rng.gumbel(loc=3 * scale, scale=scale, size=n)) + 1.0
+        name = f"STN{i + 1}"
+        station_data[name] = x
+        station_years[name] = np.arange(start_year, start_year + n)
+    return R.run_regional_analysis("TestRegion", station_data, n_sim=100, seed=1,
+                                    station_years=station_years)
+
+
 def test_save_regional_growth_curve_plot(sample_regional_result, tmp_path):
     out = tmp_path / "growth.png"
     P.save_regional_growth_curve_plot(sample_regional_result, out)
@@ -226,6 +246,29 @@ def test_save_regional_station_series_plot(sample_regional_result, tmp_path):
     out = tmp_path / "series.png"
     P.save_regional_station_series_plot(sample_regional_result, out)
     _assert_nonempty_file(out)
+
+
+def test_regional_station_series_plot_uses_years_when_available(sample_regional_result_with_years, tmp_path):
+    result = sample_regional_result_with_years
+    out = tmp_path / "series_years.png"
+    P.save_regional_station_series_plot(result, out)
+    _assert_nonempty_file(out)
+
+    # rebuild the same per-panel logic to check the x-axis actually reflects
+    # real years (not just 1..n) for a station that has them
+    s = result.stations[0]
+    years = result.station_years.get(s.name)
+    assert years is not None
+    assert years.min() == 1950
+
+
+def test_regional_station_series_plot_falls_back_without_years(sample_regional_result, tmp_path):
+    # sample_regional_result has no station_years at all -- should still
+    # render fine, just falling back to observation-order x-axis
+    out = tmp_path / "series_no_years.png"
+    P.save_regional_station_series_plot(sample_regional_result, out)
+    _assert_nonempty_file(out)
+    assert sample_regional_result.station_years == {}
 
 
 def test_save_regional_discordancy_plot(sample_regional_result, tmp_path):

@@ -35,9 +35,24 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
-# Input data -- kept locally only, not tracked in git
+# Input data -- kept locally only, not tracked in git, EXCEPT the bundled
+# example/template files below (shipped so a fresh clone/checkout has
+# something to try immediately -- without these exceptions, everything
+# under Data/ would be silently excluded, templates included, even though
+# they're meant to ship with the repo)
 /Data/*
 !/Data/.gitkeep
+!/Data/Template.csv
+!/Data/Templates/
+!/Data/Templates/*.csv
+!/Data/Templates/discharge_station_data/
+!/Data/Templates/discharge_station_data/*.csv
+!/Data/Templates/rainfall_station_data/
+!/Data/Templates/rainfall_station_data/*.csv
+!/Data/Regional/
+/Data/Regional/*
+!/Data/Regional/Template/
+!/Data/Regional/Template/*.csv
 
 # Generated output -- regenerated locally, not tracked in git
 /Output/*
@@ -49,3 +64,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# This file itself -- included in delivery zips as a cover letter for you,
+# not meant to be part of the tracked project
+MANIFEST.txt

@@ -88,12 +88,12 @@ def _make_fake_project(tmp_path):
 
 def test_resolve_region_builds_expected_paths_and_creates_output_dirs(tmp_path):
     module_file = _make_fake_project(tmp_path)
-    paths = resolve_region("Piedmont", module_file)
-    assert paths.region_name == "Piedmont"
+    paths = resolve_region("Template", module_file)
+    assert paths.region_name == "Template"
     assert paths.project_root == tmp_path
-    assert paths.data_dir == tmp_path / "Data" / "Regional" / "Piedmont"
-    assert paths.output_dir == tmp_path / "Output" / "Regional" / "Piedmont"
-    assert paths.plot_dir == tmp_path / "Plot" / "Regional" / "Piedmont"
+    assert paths.data_dir == tmp_path / "Data" / "Regional" / "Template"
+    assert paths.output_dir == tmp_path / "Output" / "Regional" / "Template"
+    assert paths.plot_dir == tmp_path / "Plot" / "Regional" / "Template"
     # output/plot dirs are created eagerly (mirrors resolve_case's behavior)
     assert paths.output_dir.is_dir()
     assert paths.plot_dir.is_dir()
@@ -103,7 +103,7 @@ def test_resolve_region_builds_expected_paths_and_creates_output_dirs(tmp_path):
 
 def test_load_region_stations_reads_one_array_per_csv(tmp_path):
     module_file = _make_fake_project(tmp_path)
-    paths = resolve_region("Piedmont", module_file)
+    paths = resolve_region("Template", module_file)
     paths.data_dir.mkdir(parents=True)
     pd.DataFrame({"year": [2000, 2001, 2002, 2003, 2004],
                   "Q": [100.0, 110.0, 105.0, 120.0, 95.0]}).to_csv(
@@ -112,10 +112,26 @@ def test_load_region_stations_reads_one_array_per_csv(tmp_path):
                   "Q": [50.0, 55.0, 48.0, 60.0, 52.0, 58.0]}).to_csv(
         paths.data_dir / "STN_B.csv", index=False)
 
-    stations = load_region_stations(paths)
-    assert set(stations) == {"STN_A", "STN_B"}
-    assert len(stations["STN_A"]) == 5
-    assert len(stations["STN_B"]) == 6
+    station_data, station_years = load_region_stations(paths)
+    assert set(station_data) == {"STN_A", "STN_B"}
+    assert len(station_data["STN_A"]) == 5
+    assert len(station_data["STN_B"]) == 6
+    assert set(station_years) == {"STN_A", "STN_B"}
+    assert list(station_years["STN_A"]) == [2000, 2001, 2002, 2003, 2004]
+    assert list(station_years["STN_B"]) == [1990, 1991, 1992, 1993, 1994, 1995]
+
+
+def test_load_region_stations_year_is_none_without_year_column(tmp_path):
+    module_file = _make_fake_project(tmp_path)
+    paths = resolve_region("Template", module_file)
+    paths.data_dir.mkdir(parents=True)
+    # no year-like column at all -- just an unlabeled value series
+    pd.DataFrame({"flood": [100.0, 110.0, 105.0, 120.0, 95.0]}).to_csv(
+        paths.data_dir / "STN_C.csv", index=False)
+
+    station_data, station_years = load_region_stations(paths)
+    assert len(station_data["STN_C"]) == 5
+    assert station_years["STN_C"] is None
 
 
 def test_load_region_stations_missing_dir_raises(tmp_path):

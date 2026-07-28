@@ -144,7 +144,7 @@ def stations_table(stations: Sequence[StationLMoments]) -> pd.DataFrame:
 
 
 def station_data_quality(stations: Sequence[StationLMoments], station_data: dict,
-                          alpha: float = 0.05) -> pd.DataFrame:
+                          station_years: dict | None = None, alpha: float = 0.05) -> pd.DataFrame:
     """
     Per-station data quality checks, run BEFORE pooling: a trending or
     outlier-contaminated station can quietly bias the pooled growth curve,
@@ -153,25 +153,35 @@ def station_data_quality(stations: Sequence[StationLMoments], station_data: dict
     Grubbs' outlier test, and basic input validation the single-station
     tool runs -- applied here to each station's own record independently.
 
-    Note: regional station CSVs aren't required to carry a year column
-    (unlike single-station cases), so the Mann-Kendall test and Sen's
-    slope use record order as a stand-in for time here -- the same
-    fallback the single-station tool uses when no year column is present.
-    If your station CSVs do have years and you want the trend test keyed
-    to actual calendar time, pass `years` through to `read_series()`
-    yourself and adapt this call; `load_region_stations()` doesn't
-    currently plumb years through (see io_utils.py).
+    `station_years`, as returned by `io_utils.load_region_stations()`, maps
+    station name -> years array (or None). When available for a station,
+    this is passed through to the Mann-Kendall/Sen's-slope/validation
+    checks, which then: (a) can detect missing years within a station's
+    nominal span (the same "year range spans N years but there are only M
+    values" warning the single-station tool gives), and (b) report Sen's
+    slope in real per-calendar-year units. Mann-Kendall's trend
+    classification and p-value are rank-based and unaffected either way
+    (they don't depend on the actual spacing between observations, only
+    their order) -- years change what you learn ABOUT the time axis, not
+    whether a trend is detected. For any station without years (either
+    `station_years` wasn't passed, or that station's own CSV had no
+    detectable year column), record order is used as a stand-in for time,
+    same as the single-station tool's fallback when no year column is
+    present.
     """
     rows = []
     for s in stations:
         x = np.asarray(station_data[s.name], dtype=float)
-        dq = _data_quality.run_all(x, years=None, alpha=alpha)
+        years = station_years.get(s.name) if station_years else None
+        dq = _data_quality.run_all(x, years=years, alpha=alpha)
         mk, gr = dq["mann_kendall"], dq["grubbs"]
         rows.append({
             "station": s.name, "n": x.size,
+            "years_available": years is not None,
             "mann_kendall_trend": mk["trend"],
             "mann_kendall_p_value": round(mk["p_value"], 4),
             "mann_kendall_significant": mk["significant"],
+            "sens_slope_per_year": round(dq["sens_slope"]["slope"], 4),
             "grubbs_high_outlier_value": gr["high_outlier_value"],
             "grubbs_high_outlier_flagged": gr["high_outlier_flagged"],
             "grubbs_low_outlier_value": gr["low_outlier_value"],
@@ -713,18 +723,27 @@ class RegionalAnalysisResult:
     growth_curve: RegionalGrowthCurve
     quantile_table: pd.DataFrame
     station_data: dict = field(default_factory=dict)  # {station_name: raw values array}
+    station_years: dict = field(default_factory=dict)  # {station_name: years array or None}
 
 
 def run_regional_analysis(region_name: str, station_data: dict,
                            candidates: Sequence[str] = ("glo", "gev", "gno", "pe3", "gpa"),
                            n_sim: int = 500, seed: int | None = None,
                            return_periods=(2, 5, 10, 20, 25, 50, 100, 200, 500, 1000),
-                           family: str | None = None) -> RegionalAnalysisResult:
+                           family: str | None = None,
+                           station_years: dict | None = None) -> RegionalAnalysisResult:
     """
     Run the full six-step regional (index-flood, L-moment-based) pipeline
     for one pooling group.
 
     station_data: {station_name: 1-D array-like of annual maxima, ...}
+    station_years: optional {station_name: 1-D array-like of years, ...}
+        (or with some/all values None), as returned by
+        `io_utils.load_region_stations()`. When given, feeds the
+        Mann-Kendall/Sen's-slope/validation checks in
+        `station_data_quality()` real calendar time instead of falling
+        back to record order -- see that function's docstring for what
+        this does and doesn't change.
     family: force a specific regional distribution instead of using
         `recommend_family()` on the Z-statistic table (e.g. to match a
         published study, or to compare families deliberately).
@@ -737,7 +756,7 @@ def run_regional_analysis(region_name: str, station_data: dict,
 
     stations = [station_lmoments(name, x) for name, x in station_data.items()]
     stations_df = stations_table(stations)
-    dq_df = station_data_quality(stations, station_data)
+    dq_df = station_data_quality(stations, station_data, station_years=station_years)
     disc_df = discordancy(stations)
     het = heterogeneity(stations, n_sim=n_sim, seed=seed)
     zdf = zstatistics(stations, candidates=candidates, n_sim=n_sim, seed=seed)
@@ -749,4 +768,5 @@ def run_regional_analysis(region_name: str, station_data: dict,
         region_name=region_name, stations=stations, stations_df=stations_df,
         data_quality_df=dq_df, discordancy_df=disc_df, heterogeneity_result=het, zstat_df=zdf,
         chosen_family=chosen, growth_curve=growth_curve, quantile_table=q_table,
-        station_data={k: np.asarray(v, dtype=float) for k, v in station_data.items()})
+        station_data={k: np.asarray(v, dtype=float) for k, v in station_data.items()},
+        station_years=dict(station_years) if station_years else {})

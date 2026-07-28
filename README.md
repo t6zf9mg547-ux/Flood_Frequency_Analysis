@@ -1,17 +1,28 @@
 # Flood Frequency Analysis
 
+[![Tests](https://github.com/<OWNER>/<REPO>/actions/workflows/tests.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/tests.yml)
+<!-- Replace <OWNER>/<REPO> above with this repo's actual GitHub path once pushed, e.g. jsmith/Flood_Frequency_Analysis -->
+
 A Python tool for flood frequency analysis on annual-maximum inflow series, using [uv](https://docs.astral.sh/uv/) for dependency management. Fits 9 candidate distributions (Normal, LogNormal 2p/3p, Gumbel, GEV, Exponential, Gamma, Pearson III, Log-Pearson III) via method of moments / maximum likelihood / probability-weighted moments, ranks them by AIC/BIC/KS/Anderson-Darling, and reports a best-fit recommendation (plus an Akaike-weighted multi-model average) with bootstrap confidence intervals.
 
 ## What's included
 ```
 Flood_Frequency_Analysis/
+├── .github/workflows/tests.yml   # GitHub Actions: runs the pytest suite on every push/PR
 ├── Data/            # input data, one CSV per case: Data/<CaseName>.csv (not tracked in git)
+│   ├── Templates/                # example pooling-group candidate catalogs (NOT a single-station case -- kept out
+│   │                              # of Data/*.csv so run_analysis.py's picker never lists them by mistake)
+│   │   ├── candidate_descriptors_discharge_TEMPLATE.csv
+│   │   ├── candidate_descriptors_rainfall_TEMPLATE.csv
+│   │   ├── discharge_station_data/     # matching annual-maximum series, one CSV per candidate
+│   │   └── rainfall_station_data/      # matching annual-maximum series, one CSV per candidate
 │   └── Regional/<RegionName>/   # station CSVs for one regional (pooled) analysis group
 ├── Module/
 │   ├── run_analysis.py           # single-station CLI entry point
 │   ├── run_regional_analysis.py  # regional (pooled) CLI entry point
+│   ├── form_pooling_group.py     # propose a pooling group from a candidate descriptor catalog
 │   ├── floodfreq/                # the package
-│   └── tests/                    # pytest regression suite (166+ tests)
+│   └── tests/                    # pytest regression suite (200+ tests)
 ├── Output/          # generated CSVs, one subfolder per case: Output/<CaseName>/ (not tracked in git)
 │   └── Regional/<RegionName>/    # regional analysis CSV outputs
 ├── Plot/            # generated PNG plots, one subfolder per case: Plot/<CaseName>/ (not tracked in git)
@@ -32,6 +43,8 @@ uv sync
 ```bash
 uv run pytest Module/tests/ -v
 ```
+
+This same command also runs automatically on every push and pull request via GitHub Actions (`.github/workflows/tests.yml`), against the committed `uv.lock` for a reproducible environment. Check the Actions tab on GitHub for results, or the badge at the top of this file.
 
 ## How to run an analysis
 
@@ -98,13 +111,13 @@ Drop one CSV per station into `Data/Regional/<RegionName>/` (same `year,Q`-style
 ```bash
 uv run python Module/run_regional_analysis.py <RegionName>
 ```
-or with no arguments to pick interactively from whatever region folders exist under `Data/Regional/`. For example, with the included `Data/Regional/Piedmont/` (a 6-station synthetic demo region):
+or with no arguments to pick interactively from whatever region folders exist under `Data/Regional/`. For example, with your own `Data/Regional/Template/` populated with station CSVs:
 ```bash
-uv run python Module/run_regional_analysis.py Piedmont
+uv run python Module/run_regional_analysis.py Template
 ```
 
 This will:
-1. Check each station's data quality BEFORE pooling — the same Mann-Kendall stationarity test, Grubbs' outlier test, and basic input validation the single-station tool runs, applied to each station's own record (a trending or outlier-contaminated station can quietly bias the pooled growth curve)
+1. Check each station's data quality BEFORE pooling — the same Mann-Kendall stationarity test, Grubbs' outlier test, and basic input validation the single-station tool runs, applied to each station's own record (a trending or outlier-contaminated station can quietly bias the pooled growth curve). Station CSVs with a detectable year column (auto-detected the same way as single-station cases, or via `--year-col`) get the trend test keyed to real calendar time, Sen's slope reported in per-calendar-year units, and a check for missing years within a station's nominal span; stations without one fall back to record order, same as the single-station tool's own fallback.
 2. Compute each station's sample L-moments/ratios (L-CV, L-skewness, L-kurtosis)
 3. Screen for discordant stations — a discordancy measure D_i flags any station statistically inconsistent with the rest of the group, against Hosking & Wallis's tabulated critical values
 4. Test whether the group is homogeneous enough to pool — the heterogeneity measure H1 compares the observed dispersion of at-site L-CV against Monte-Carlo-simulated synthetic homogeneous regions (H1 < 1 acceptably homogeneous, 1–2 possibly heterogeneous, ≥ 2 definitely heterogeneous)
@@ -117,7 +130,7 @@ This will:
    - `regional_growth_curve.png` — the dimensionless regional growth curve (a "Dalrymple plot"), with every station's own data rescaled by its own index flood so all stations land on one common curve, plus a light-grey diagnostic overlay showing all stations' growth factors pooled and re-ranked together as one combined record (subtle by design — see `regional_pooled_vs_stations.png` below for a much clearer side-by-side version of the same comparison)
    - `regional_pooled_vs_stations.png` — two panels at equal visual weight: left is the per-station view (what the curve is actually fit to); right is every station's data pooled into one array and re-ranked as if it were a single combined record (`sum(n_i)` years), colored uniformly since station identity is gone once concatenated — the clearest way to see how much further out along the T axis naive concatenation appears to reach, and why the index-flood method doesn't do that
    - `regional_discordancy.png` — bar chart of each station's D_i against the group's critical value
-   - `regional_station_series.png` — small multiples of each station's raw annual-maximum series, for a quick visual screen before trusting the pooling
+   - `regional_station_series.png` — small multiples of each station's raw annual-maximum series (plotted against calendar year when available, observation order otherwise), for a quick visual screen before trusting the pooling
    - `station_<StationName>_design_flood.png` — one per station: that station's own observed data against its regional design-flood curve (growth curve × that station's index flood) — the file to actually hand to a client for that site
    - `regional_dashboard.png` — growth curve, L-moment ratio diagram, discordancy chart, and a text summary panel combined into one page
 
@@ -125,15 +138,107 @@ This will:
 
 Useful flags:
 ```bash
-uv run python Module/run_regional_analysis.py Piedmont --n-sim 1000 --seed 42
-uv run python Module/run_regional_analysis.py Piedmont --family gev
-uv run python Module/run_regional_analysis.py Piedmont --candidates gev gno pe3
-uv run python Module/run_regional_analysis.py Piedmont --return-periods 10 50 100 500
-uv run python Module/run_regional_analysis.py Piedmont --confidence-level 90
-uv run python Module/run_regional_analysis.py Piedmont --no-ci
+uv run python Module/run_regional_analysis.py Template --n-sim 1000 --seed 42
+uv run python Module/run_regional_analysis.py Template --family gev
+uv run python Module/run_regional_analysis.py Template --candidates gev gno pe3
+uv run python Module/run_regional_analysis.py Template --return-periods 10 50 100 500
+uv run python Module/run_regional_analysis.py Template --confidence-level 90
+uv run python Module/run_regional_analysis.py Template --no-ci
 ```
 
 Needs at least 4 stations (discordancy requires inverting a 3×3 covariance matrix). Regional analysis is separate from the single-station tool above and doesn't currently read per-station `.toml` settings files.
+
+### Forming a pooling group automatically
+
+**Do you actually need this?** Only if you're choosing among a *larger pool* of candidate stations and want a data-driven suggestion for which ones to pool. If you already know which stations belong together — the common case if you're working from a short, hand-picked list — skip this entirely and just build `Data/Regional/<RegionName>/` directly (copy `Data/Regional/Template/`, swap in real data). There's nothing here that's required before running `run_regional_analysis.py`.
+
+If you do have a larger candidate pool, the four-step recipe:
+
+1. **Duplicate the descriptor catalog** — one row per candidate station:
+   ```bash
+   cp Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv Data/Templates/my_candidates.csv
+   ```
+   Replace the example rows with your real candidates' real descriptor values.
+
+2. **Duplicate the matching station-data folder** — each candidate's own annual-maximum series:
+   ```bash
+   cp -r Data/Templates/discharge_station_data Data/Templates/my_station_data
+   ```
+   Replace the example CSVs with your real stations' `year,Q` files. **The filename must exactly match the `station` value in your catalog** — a catalog row with `station=GAUGE_014` needs a file named `GAUGE_014.csv`.
+
+3. **Run it** against your own files:
+   ```bash
+   uv run python Module/form_pooling_group.py \
+       --catalog Data/Templates/my_candidates.csv \
+       --descriptors area_km2 mean_annual_precip_mm \
+       --target-station GAUGE_014 --n-stations 6 --region-name MyNewRegion \
+       --station-data-dir Data/Templates/my_station_data --apply
+   ```
+
+4. **Run the actual analysis** on the result:
+   ```bash
+   uv run python Module/run_regional_analysis.py MyNewRegion
+   ```
+
+The rest of this section covers the details behind that recipe: descriptor sources, the ranking math, and every flag.
+
+Rather than hand-picking which stations to pool, `form_pooling_group.py` implements the "region of influence" approach (Burn, 1990): given a target site and a catalog of candidate stations described by numeric descriptors, it ranks candidates by similarity and proposes a group.
+
+This is deliberately **descriptor-source-agnostic** — it doesn't extract descriptors itself, it just consumes whatever numeric columns you give it in a candidate catalog CSV (`station` column + descriptor columns + an optional `n_years` column). Which descriptors make sense depends on what you're pooling:
+
+- **Streamflow gauges**: catchment area, mean annual precipitation, a soil/permeability index, channel slope, urban extent — i.e. attributes of the drainage basin. A natural source is [HydroSHEDS/BasinATLAS](https://www.hydrosheds.org/), which provides these at the sub-basin level (snap each gauge's coordinates to its containing sub-basin to look them up).
+- **Rain gauges** (or any other generic annual-maximum variable): geographic coordinates, elevation, and a point climatology (e.g. mean annual precipitation sampled directly from a gridded product like WorldClim/CHELSA at the station's coordinates) — basin-level attributes like soil permeability or channel slope don't mean anything for a point measurement with no upstream catchment.
+
+Producing the candidate catalog CSV (i.e. actually looking up descriptor values for your stations) is outside this script's scope — bring your own GIS workflow. Two example catalogs are bundled so you can try the CLI immediately, no editing required: `Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv` (10 synthetic gauges: `area_km2`, `mean_annual_precip_mm`, `bfihost`, `mean_slope_m_per_km`, `urban_extent_frac`, `n_years`) and `Data/Templates/candidate_descriptors_rainfall_TEMPLATE.csv` (10 synthetic rain gauges: `lat`, `lon`, `elevation_m`, `mean_annual_precip_mm`, `n_years`). Column names in both are illustrative — rename them to match your own extraction, or just pass whatever names your own catalog actually uses via `--descriptors`.
+
+Each catalog has a matching folder of synthetic annual-maximum series, one CSV per candidate, with each station's record length matching its catalog row's `n_years` and its magnitude scaled (loosely, illustratively) with its own `area_km2`/`mean_annual_precip_mm` — enough to run the full pipeline (`--apply` → `run_regional_analysis.py`) end to end using only bundled content: `Data/Templates/discharge_station_data/` (columns `year,Q`) and `Data/Templates/rainfall_station_data/` (columns `year,Rainfall_mm`).
+
+```bash
+# Try it right now with the bundled discharge template (dry run)
+uv run python Module/form_pooling_group.py \
+    --catalog Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv \
+    --descriptors area_km2 mean_annual_precip_mm bfihost mean_slope_m_per_km urban_extent_frac \
+    --target-station GAUGE_001 --n-stations 4 --region-name MyRegion
+
+# ...or the bundled rainfall template
+uv run python Module/form_pooling_group.py \
+    --catalog Data/Templates/candidate_descriptors_rainfall_TEMPLATE.csv \
+    --descriptors lat lon elevation_m mean_annual_precip_mm \
+    --target-station RAINGAUGE_001 --n-stations 4 --region-name MyRegion
+
+# Full pipeline using ONLY bundled content: form the group, copy the station
+# CSVs, then actually run the regional analysis on the result
+uv run python Module/form_pooling_group.py \
+    --catalog Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv \
+    --descriptors area_km2 mean_annual_precip_mm bfihost mean_slope_m_per_km urban_extent_frac \
+    --target-station GAUGE_001 --n-stations 5 --region-name MyRegion \
+    --station-data-dir Data/Templates/discharge_station_data --apply
+uv run python Module/run_regional_analysis.py MyRegion
+
+# Dry run against your own catalog
+uv run python Module/form_pooling_group.py \
+    --catalog candidates.csv \
+    --descriptors area_km2 mean_annual_precip_mm bfihost \
+    --target-station GAUGE_042 --n-stations 8 --region-name MyRegion
+
+# Ungauged target site, stop once 250 station-years are pooled
+uv run python Module/form_pooling_group.py \
+    --catalog candidates.csv \
+    --descriptors area_km2 mean_annual_precip_mm \
+    --target-descriptors area_km2=180 mean_annual_precip_mm=1050 \
+    --min-years 250 --region-name MyRegion
+
+# Actually copy the proposed stations' CSVs into Data/Regional/MyRegion/
+uv run python Module/form_pooling_group.py \
+    --catalog candidates.csv \
+    --descriptors area_km2 mean_annual_precip_mm \
+    --target-station GAUGE_042 --n-stations 8 --region-name MyRegion \
+    --station-data-dir /path/to/all_candidate_series/ --apply
+```
+
+This ranks every other candidate by weighted Euclidean distance to the target in standardized descriptor space (z-scored using the candidate pool's own mean/std, so descriptors on very different scales — e.g. area in km² vs. a 0-1 soil index — contribute comparably), then applies one of two stopping rules: `--n-stations` (take the N most similar) or `--min-years` (accumulate the most similar candidates until their combined record length reaches a target, per Hosking & Wallis's rule-of-thumb of roughly 5× the design return period in station-years). Writes `pooling_ranking_full.csv` and `pooling_group_proposed.csv` to `Output/Regional/<RegionName>/`; with `--apply`, also copies the proposed stations' own CSVs (from `--station-data-dir`) into `Data/Regional/<RegionName>/`, ready for `run_regional_analysis.py`.
+
+**This is a proposal step, not a substitute for discordancy/heterogeneity screening** — always run `run_regional_analysis.py` on the resulting group afterward; a statistically similar-looking descriptor set doesn't guarantee a homogeneous region.
 
 ## Per-case settings file (optional)
 
@@ -171,8 +276,8 @@ uv remove <package>
 ## Notes
 
 - `[tool.uv] package = false` in `pyproject.toml` marks this as a scripts project rather than an installable package — required so `uv sync`/`uv add` don't try (and fail) to build a wheel.
-- `Data/`, `Output/`, and `Plot/` are excluded from git by default, since they typically hold large or regenerated files. Adjust `.gitignore` per-project if you want any of them tracked.
+- `Data/`, `Output/`, and `Plot/` are excluded from git by default, since they typically hold large, regenerated, or locally-specific files — with explicit exceptions for `Data/Template.csv`, `Data/Templates/candidate_descriptors_{discharge,rainfall}_TEMPLATE.csv`, `Data/Templates/{discharge,rainfall}_station_data/*.csv`, and `Data/Regional/Template/*.csv` so a fresh clone has something to try immediately. Adjust `.gitignore` per-project if you want anything else tracked (e.g. your own real station data, which most people will want to keep local/private rather than committed).
 - Reading legacy `.xls` (not `.xlsx`) input directly would additionally need `xlrd` (`uv add xlrd`) — not included by default since the expected input is `Data/<CaseName>.csv`.
 - The "plotting position" formula (Weibull, Hazen, Cunnane, Gringorten, Hosking, Blom) affects where empirical points are drawn on probability plots and the descriptive-statistics summary — it does **not** change PWM-fitted parameters, which always use the standard unbiased L-moment estimator. See `summary.txt` for the full explanation, generated with each run.
 - Quantiles are reported out to T=10,000 years by default, but treat anything much beyond ~2-3x your record length as increasingly uncertain (`summary.txt` flags this per-row and adds an explicit warning when T exceeds 10x the record length) — that far out, the design flood depends more on which distribution's tail you trust than on the data itself.
-- Keep `Data/` free of stray/example CSVs you don't intend to analyze (e.g. an old `Template.csv`). The interactive picker (when running with no case name) shows row count and last-modified time for each file to help tell them apart, but it's easy to select the wrong one by accident, and every result and plot title is derived from that file's name.
+- Keep `Data/` free of stray/example CSVs you don't intend to analyze. The interactive picker (when running with no case name) shows row count and last-modified time for each file to help tell them apart, but it's easy to select the wrong one by accident, and every result and plot title is derived from that file's name — including the bundled `Data/Template.csv` demo, which will show up in that picker alongside your own real cases.

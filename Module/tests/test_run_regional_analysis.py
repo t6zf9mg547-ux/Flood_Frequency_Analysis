@@ -57,10 +57,13 @@ def test_csv_hint_reports_row_count(tmp_path):
 def test_end_to_end_run_writes_expected_outputs(region_project):
     root, module_file = region_project
     paths = resolve_region("TestRegion", module_file)
-    station_data = load_region_stations(paths)
+    station_data, station_years = load_region_stations(paths)
     assert len(station_data) == 4
+    # the fixture writes a year column for every station
+    assert all(y is not None for y in station_years.values())
 
-    result = run_regional_analysis("TestRegion", station_data, n_sim=100, seed=1)
+    result = run_regional_analysis("TestRegion", station_data, n_sim=100, seed=1,
+                                    station_years=station_years)
 
     # -- CSV outputs (mirrors what main() writes) --
     result.stations_df.to_csv(paths.output_dir / "station_lmoments.csv", index=False)
@@ -78,9 +81,12 @@ def test_end_to_end_run_writes_expected_outputs(region_project):
     # -- data_quality.csv content --
     assert len(result.data_quality_df) == len(station_data)
     assert set(result.data_quality_df["station"]) == set(station_data)
-    for col in ("mann_kendall_trend", "mann_kendall_significant",
-                "grubbs_high_outlier_flagged", "grubbs_low_outlier_flagged"):
+    for col in ("mann_kendall_trend", "mann_kendall_significant", "years_available",
+                "sens_slope_per_year", "grubbs_high_outlier_flagged", "grubbs_low_outlier_flagged"):
         assert col in result.data_quality_df.columns
+    # years were available for every station (per the fixture), so the
+    # per-calendar-year Sen's slope should actually be populated
+    assert result.data_quality_df["years_available"].all()
 
     # -- CI table content --
     assert set(ci_df["station"]) == set(station_data)
@@ -134,9 +140,10 @@ def test_end_to_end_run_writes_expected_outputs(region_project):
 def test_forced_family_is_reflected_in_summary(region_project):
     root, module_file = region_project
     paths = resolve_region("TestRegion", module_file)
-    station_data = load_region_stations(paths)
+    station_data, station_years = load_region_stations(paths)
 
-    result = run_regional_analysis("TestRegion", station_data, n_sim=50, seed=1, family="pe3")
+    result = run_regional_analysis("TestRegion", station_data, n_sim=50, seed=1, family="pe3",
+                                    station_years=station_years)
     assert result.chosen_family == "pe3"
     summary = build_summary_text(result, build_provenance_header())
     assert "Pearson Type III (PE3)" in summary
