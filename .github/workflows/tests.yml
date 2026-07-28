@@ -1,0 +1,33 @@
+name: Tests
+
+# Runs the pytest suite (Module/tests/) on every push and pull request, so
+# regressions get caught automatically instead of relying on remembering to
+# run `uv run pytest` locally before pushing.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: # allows manually triggering a run from the Actions tab
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python (matches pyproject.toml's requires-python)
+        run: uv python install 3.12
+
+      - name: Install dependencies (from the committed uv.lock)
+        run: uv sync --locked
+
+      - name: Run test suite
+        run: uv run pytest Module/tests/ -v
