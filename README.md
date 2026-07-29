@@ -3,7 +3,13 @@
 [![Tests](https://github.com/<OWNER>/<REPO>/actions/workflows/tests.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/tests.yml)
 <!-- Replace <OWNER>/<REPO> above with this repo's actual GitHub path once pushed, e.g. jsmith/Flood_Frequency_Analysis -->
 
-A Python tool for flood frequency analysis on annual-maximum inflow series, using [uv](https://docs.astral.sh/uv/) for dependency management. Fits 9 candidate distributions (Normal, LogNormal 2p/3p, Gumbel, GEV, Exponential, Gamma, Pearson III, Log-Pearson III) via method of moments / maximum likelihood / probability-weighted moments, ranks them by AIC/BIC/KS/Anderson-Darling, and reports a best-fit recommendation (plus an Akaike-weighted multi-model average) with bootstrap confidence intervals.
+A Python tool for flood frequency analysis — and more generally, frequency analysis of any annual-maximum series (rainfall included) — using [uv](https://docs.astral.sh/uv/) for dependency management. It has three main objectives:
+
+1. **[Single-station analysis](#how-to-run-an-analysis)** — fits 9 candidate distributions (Normal, LogNormal 2p/3p, Gumbel, GEV, Exponential, Gamma, Pearson III, Log-Pearson III) to one station's annual-maximum series via method of moments / maximum likelihood / probability-weighted moments, ranks them by AIC/BIC/KS/Anderson-Darling, and reports a best-fit recommendation (plus an Akaike-weighted multi-model average) with bootstrap confidence intervals.
+2. **[Regional (pooled) analysis](#regional-pooled-flood-frequency-analysis)** — the index-flood method (Dalrymple, 1960; Hosking & Wallis, 1997): pools several hydrologically-similar stations so the *shape* of the flood distribution is estimated from many station-years combined, with full discordancy/heterogeneity/distribution-selection diagnostics, per-station data quality checks, and Monte-Carlo confidence intervals.
+3. **[Automatic pooling-group formation](#forming-a-pooling-group-automatically)** — the "region of influence" approach (Burn, 1990): given a target site and a catalog of candidate stations described by numeric descriptors (catchment area, precipitation, etc. for streamflow; coordinates, elevation, climatology for rainfall), ranks candidates by similarity and proposes which ones to pool, rather than requiring the group to be assembled by hand.
+
+All three work for streamflow, rainfall, or any other generic annual-maximum variable (see [Beyond streamflow](#beyond-streamflow-any-annual-maximum-series)).
 
 ## What's included
 ```

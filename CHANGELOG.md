@@ -2,6 +2,12 @@
 
 All notable changes to the Flood Frequency Analysis tool are documented here.
 
+## [0.5.6] - 2026-07-28
+
+### Fixed — README gave the impression this tool only does single-station analysis
+- Replaced the opening paragraph (which described only the 9-distribution single-station fitting) with a three-objective overview, giving equal footing to: (1) single-station analysis, (2) regional (pooled) analysis, and (3) automatic pooling-group formation -- each with a working jump-link to its full section.
+- No code changes this round -- README.md only.
+
 ## [0.5.5] - 2026-07-28
 
 ### Fixed — Documentation gap: when do you need form_pooling_group.py, and what exactly do you edit?
