@@ -16,16 +16,21 @@ All four work for streamflow, rainfall, or any other generic annual-maximum vari
 ```
 Flood_Frequency_Analysis/
 ├── .github/workflows/tests.yml   # GitHub Actions: runs the pytest suite on every push/PR
-├── Data/            # input data, one CSV per case: Data/<CaseName>.csv (not tracked in git)
-│   ├── Templates/                # example pooling-group candidate catalogs (NOT a single-station case -- kept out
-│   │                              # of Data/*.csv so run_analysis.py's picker never lists them by mistake)
-│   │   ├── candidate_descriptors_discharge_TEMPLATE.csv
+├── Data/            # input data, case-first: Data/<CaseName>/ (only Data/Templates/ is tracked)
+│   ├── Templates/                # ALL shipped example/template files live here (the only tracked
+│   │   │                         # part of Data/); a real case under Data/<CaseName>/ is never tracked
+│   │   ├── candidate_descriptors_discharge_TEMPLATE.csv   # pooling-group candidate catalogs
 │   │   ├── candidate_descriptors_rainfall_TEMPLATE.csv
 │   │   ├── discharge_station_data/     # matching annual-maximum series, one CSV per candidate
-│   │   └── rainfall_station_data/      # matching annual-maximum series, one CSV per candidate
-│   ├── Regional/<RegionName>/   # station CSVs for one regional (pooled) analysis group
-│   └── Climate_Adjustment/      # climate-informed (CIFAM) inputs, one CSV per case
-│       └── Template.csv          # the four delta/tau climate numbers to duplicate per case (tracked)
+│   │   ├── rainfall_station_data/      # matching annual-maximum series, one CSV per candidate
+│   │   └── ...                         # single-station + climate-adjustment templates too
+│   ├── <CaseName>/              # one folder per case (not tracked)
+│   │   ├── <CaseName>.csv        #   baseline annual-maximum series (named after the folder)
+│   │   ├── <CaseName>.toml       #   optional per-case settings
+│   │   └── climate_adjustment/   #   climate-informed (CIFAM) inputs, one CSV per scenario
+│   │       ├── rcp45.csv
+│   │       └── rcp85.csv
+│   └── Regional/<RegionName>/   # station CSVs for one regional (pooled) analysis group (not tracked)
 ├── Module/
 │   ├── run_analysis.py           # single-station CLI entry point
 │   ├── run_regional_analysis.py  # regional (pooled) CLI entry point
@@ -34,10 +39,10 @@ Flood_Frequency_Analysis/
 │   ├── floodfreq/                # the package
 │   └── tests/                    # pytest regression suite (200+ tests)
 ├── Output/          # generated CSVs, one subfolder per case: Output/<CaseName>/ (not tracked in git)
-│   ├── <CaseName>/Climate_Adjustment/   # climate-adjustment CSV outputs (nested under the case)
+│   ├── <CaseName>/Climate_Adjustment/<scenario>/   # climate-adjustment CSV outputs (per scenario)
 │   └── Regional/<RegionName>/    # regional analysis CSV outputs
 ├── Plot/            # generated PNG plots, one subfolder per case: Plot/<CaseName>/ (not tracked in git)
-│   ├── <CaseName>/Climate_Adjustment/   # climate-adjustment PNG outputs (nested under the case)
+│   ├── <CaseName>/Climate_Adjustment/<scenario>/   # climate-adjustment PNG outputs (per scenario)
 │   └── Regional/<RegionName>/    # regional analysis PNG outputs
 ├── pyproject.toml   # project metadata + dependencies (uv-managed)
 └── .gitignore       # excludes venv, cache files, Data/Output/Plot, OS junk, etc.
@@ -60,7 +65,7 @@ This same command also runs automatically on every push and pull request via Git
 
 ## How to run an analysis
 
-Drop your annual-maximum series into `Data/<CaseName>.csv`, then either:
+Drop your annual-maximum series into `Data/<CaseName>/<CaseName>.csv`, then either:
 
 ```bash
 uv run python Module/run_analysis.py <CaseName>
@@ -124,7 +129,7 @@ Drop one CSV per station into `Data/Regional/<RegionName>/` (same `year,Q`-style
 ```bash
 uv run python Module/run_regional_analysis.py <RegionName>
 ```
-or with no arguments to pick interactively from whatever region folders exist under `Data/Regional/`. For example, with your own `Data/Regional/Template/` populated with station CSVs:
+or with no arguments to pick interactively from whatever region folders exist under `Data/Regional/`. For example, with a `Data/Regional/<RegionName>/` folder populated with station CSVs (you can copy the shipped regional example from `Data/Templates/` to start):
 ```bash
 uv run python Module/run_regional_analysis.py Template
 ```
@@ -163,7 +168,7 @@ Needs at least 4 stations (discordancy requires inverting a 3×3 covariance matr
 
 ### Forming a pooling group automatically
 
-**Do you actually need this?** Only if you're choosing among a *larger pool* of candidate stations and want a data-driven suggestion for which ones to pool. If you already know which stations belong together — the common case if you're working from a short, hand-picked list — skip this entirely and just build `Data/Regional/<RegionName>/` directly (copy `Data/Regional/Template/`, swap in real data). There's nothing here that's required before running `run_regional_analysis.py`.
+**Do you actually need this?** Only if you're choosing among a *larger pool* of candidate stations and want a data-driven suggestion for which ones to pool. If you already know which stations belong together — the common case if you're working from a short, hand-picked list — skip this entirely and just build `Data/Regional/<RegionName>/` directly (copy the shipped regional example from `Data/Templates/`, swap in real data). There's nothing here that's required before running `run_regional_analysis.py`.
 
 If you do have a larger candidate pool, the four-step recipe:
 
@@ -261,20 +266,19 @@ You supply four numbers — projected changes in **flow space**, as decimals —
 
 ### Setting up a climate-adjustment case
 
-The four climate numbers live in their own file, alongside the reused baseline series:
+The climate numbers live inside the case folder, one file per scenario, alongside the reused baseline series:
 
 ```
-Data/<CaseName>.csv                    # baseline annual-maximum series (the SAME file the
-                                       #   single-station tool uses -- not duplicated)
-Data/Climate_Adjustment/<CaseName>.csv # the four climate numbers (+ options) for this case
-Output/<CaseName>/Climate_Adjustment/  # CSV outputs (nested under the case, next to the
-                                       #   baseline analysis run_analysis.py writes there)
-Plot/<CaseName>/Climate_Adjustment/    # PNG plot
+Data/<CaseName>/<CaseName>.csv                       # baseline annual-maximum series (the SAME
+                                                     #   file the single-station tool uses)
+Data/<CaseName>/climate_adjustment/<scenario>.csv    # climate numbers (+ options), one per scenario
+Output/<CaseName>/Climate_Adjustment/<scenario>/     # CSV outputs (per scenario)
+Plot/<CaseName>/Climate_Adjustment/<scenario>/       # PNG plot (per scenario)
 ```
 
-The inputs stay analysis-type-first (`Data/Climate_Adjustment/`), but the outputs are **case-first** — nested under the same `Output/<CaseName>/` and `Plot/<CaseName>/` that `run_analysis.py` uses for the baseline analysis — so a case's baseline results and its climate adjustment sit together in one place. (Regional analysis is the other way round, `Output/Regional/<RegionName>/`, because a region isn't a single case; a climate adjustment is an extension of one.)
+Everything is **case-first** — a case owns one `Data/<CaseName>/` folder holding its baseline series, its optional `.toml` settings, and a `climate_adjustment/` subfolder — mirroring the case-first `Output/<CaseName>/` and `Plot/<CaseName>/` trees `run_analysis.py` already uses. Each climate **scenario** (e.g. `rcp45`, `rcp85`, `wet`, `dry`) is its own CSV, and its outputs land in a scenario-named subfolder so scenarios never overwrite each other. (Regional analysis stays `Data/Regional/<RegionName>/` — a region isn't a single case, whereas a climate adjustment is an extension of one.)
 
-The inputs use their own `Data/Climate_Adjustment/` folder (the outputs nest under `Output/<CaseName>/` and `Plot/<CaseName>/`, as shown above). To set up a case, **duplicate `Data/Climate_Adjustment/Template.csv`** to `Data/Climate_Adjustment/<CaseName>.csv` (using the same `<CaseName>` as your existing `Data/<CaseName>.csv` baseline series) and edit the values. The template is a self-documenting long-format table:
+To set up a scenario, **copy a climate-adjustment template from `Data/Templates/`** into `Data/<CaseName>/climate_adjustment/<scenario>.csv` (using the same `<CaseName>` as your existing `Data/<CaseName>/<CaseName>.csv` baseline) and edit the values. The template is a self-documenting long-format table:
 
 ```
 parameter,value,units,description
@@ -288,30 +292,30 @@ distribution,gumbel,name,Closed-form: gumbel | lognormal2 | pearson3
 pmf,,m3/s,Optional PMF reference value (leave blank if none)
 ```
 
-Only `delta1/delta2/tau1/tau2` are required; the rest fall back to sensible defaults. **Values are fractions, not percents** (enter `0.30`, not `30` — the loader rejects magnitudes above 1.5 to catch that mistake). The shipped `Template.csv` is pre-filled with the paper's Lom Pangar numbers as a worked example.
+Only `delta1/delta2/tau1/tau2` are required; the rest fall back to sensible defaults. **Values are fractions, not percents** (enter `0.30`, not `30` — the loader rejects magnitudes above 1.5 to catch that mistake). The shipped template is pre-filled with the paper's Lom Pangar numbers as a worked example.
 
 ### Running the adjustment
 
-Run it like the other tools, passing the case name (the picker lists `Data/Climate_Adjustment/*.csv` if you omit it):
+Run it like the other tools, passing the case name and the scenario (you'll be prompted for either if omitted):
 
 ```bash
-uv run python Module/run_climate_adjustment.py MyCase
+uv run python Module/run_climate_adjustment.py MyCase rcp85
 ```
 
-This reads `Data/MyCase.csv` (baseline series) and `Data/Climate_Adjustment/MyCase.csv` (the four climate numbers), then writes:
+This reads `Data/MyCase/MyCase.csv` (baseline series) and `Data/MyCase/climate_adjustment/rcp85.csv` (the four climate numbers), then writes:
 
-- `Output/MyCase/Climate_Adjustment/climate_adjustment_table.csv` — per return period: baseline point + CI (sampling only) and climate point + combined CI,
-- `Output/MyCase/Climate_Adjustment/summary.txt` — a provenance-stamped summary with the inputs and the table,
-- `Plot/MyCase/Climate_Adjustment/climate_adjustment.png` — a Figure-4-style plot (baseline vs climate central lines with both confidence bands, on the Gumbel reduced-variate axis, with an optional PMF line).
+- `Output/MyCase/Climate_Adjustment/rcp85/climate_adjustment_table.csv` — per return period: baseline point + CI (sampling only) and climate point + combined CI,
+- `Output/MyCase/Climate_Adjustment/rcp85/summary.txt` — a provenance-stamped summary with the inputs and the table,
+- `Plot/MyCase/Climate_Adjustment/rcp85/climate_adjustment.png` — a Figure-4-style plot (baseline vs climate central lines with both confidence bands, on the Gumbel reduced-variate axis, with an optional PMF line).
 
-Common options (all override the values in the inputs file, so a one-off scenario needs no CSV edit):
+Common options (all override the values in the inputs file, so a one-off variation needs no CSV edit):
 
 ```bash
-uv run python Module/run_climate_adjustment.py MyCase --distribution lognormal2
-uv run python Module/run_climate_adjustment.py MyCase --method monte-carlo --n-sim 50000
-uv run python Module/run_climate_adjustment.py MyCase --confidence-level 90 --no-plot
-uv run python Module/run_climate_adjustment.py MyCase --delta1 0.30 --delta2 0.18 --tau1 0.10 --tau2 0.18
-uv run python Module/run_climate_adjustment.py MyCase --variable-name "Peak inflow" --units m3/s --short-name Inflow
+uv run python Module/run_climate_adjustment.py MyCase rcp85 --distribution lognormal2
+uv run python Module/run_climate_adjustment.py MyCase rcp85 --method monte-carlo --n-sim 50000
+uv run python Module/run_climate_adjustment.py MyCase rcp85 --confidence-level 90 --no-plot
+uv run python Module/run_climate_adjustment.py MyCase rcp85 --delta1 0.30 --delta2 0.18 --tau1 0.10 --tau2 0.18
+uv run python Module/run_climate_adjustment.py MyCase rcp85 --variable-name "Peak inflow" --units m3/s --short-name Inflow
 ```
 
 `--method closed-form` (default) covers Gumbel, Log-Normal (2p) and Pearson III; any other distribution requires `--method monte-carlo`. The Monte Carlo path is also the route that will later extend to the tool's remaining candidate distributions.
@@ -329,7 +333,7 @@ from floodfreq.climate_adjustment import (
     mc_climate_adjusted_quantiles,   # Monte Carlo: distribution-agnostic
 )
 
-paths = resolve_climate_case("MyCase", __file__)   # from a script in Module/
+paths = resolve_climate_case("MyCase", "rcp85", __file__)   # case + scenario; from a script in Module/
 Q, _ = read_series(paths.baseline_csv)             # NB: read_series returns (values, years)
 ci = load_climate_inputs(paths.climate_csv)        # the four numbers + options
 
@@ -345,7 +349,7 @@ Extending the Monte Carlo path to the tool's other candidate distributions is th
 
 ## Per-case settings file (optional)
 
-Instead of retyping flags every time, save a case's settings in `Data/<CaseName>.toml`:
+Instead of retyping flags every time, save a case's settings in `Data/<CaseName>/<CaseName>.toml`:
 ```toml
 confidence_level = 90
 regional_skew = 0.0
@@ -379,8 +383,8 @@ uv remove <package>
 ## Notes
 
 - `[tool.uv] package = false` in `pyproject.toml` marks this as a scripts project rather than an installable package — required so `uv sync`/`uv add` don't try (and fail) to build a wheel.
-- `Data/`, `Output/`, and `Plot/` are excluded from git by default, since they typically hold large, regenerated, or locally-specific files — with explicit exceptions for `Data/Template.csv`, `Data/Templates/candidate_descriptors_{discharge,rainfall}_TEMPLATE.csv`, `Data/Templates/{discharge,rainfall}_station_data/*.csv`, and `Data/Regional/Template/*.csv` so a fresh clone has something to try immediately. Adjust `.gitignore` per-project if you want anything else tracked (e.g. your own real station data, which most people will want to keep local/private rather than committed).
-- Reading legacy `.xls` (not `.xlsx`) input directly would additionally need `xlrd` (`uv add xlrd`) — not included by default since the expected input is `Data/<CaseName>.csv`.
+- `Data/`, `Output/`, and `Plot/` are excluded from git by default, since they typically hold large, regenerated, or locally-specific files — with a single exception subtree, `Data/Templates/`, which holds all the shipped example/template files so a fresh clone has something to try immediately. A real case (`Data/<CaseName>/…`) and regional data (`Data/Regional/<RegionName>/…`) are never tracked. Adjust `.gitignore` per-project if you want anything else tracked (e.g. your own real station data, which most people will want to keep local/private rather than committed).
+- Reading legacy `.xls` (not `.xlsx`) input directly would additionally need `xlrd` (`uv add xlrd`) — not included by default since the expected input is `Data/<CaseName>/<CaseName>.csv`.
 - The "plotting position" formula (Weibull, Hazen, Cunnane, Gringorten, Hosking, Blom) affects where empirical points are drawn on probability plots and the descriptive-statistics summary — it does **not** change PWM-fitted parameters, which always use the standard unbiased L-moment estimator. See `summary.txt` for the full explanation, generated with each run.
 - Quantiles are reported out to T=10,000 years by default, but treat anything much beyond ~2-3x your record length as increasingly uncertain (`summary.txt` flags this per-row and adds an explicit warning when T exceeds 10x the record length) — that far out, the design flood depends more on which distribution's tail you trust than on the data itself.
-- Keep `Data/` free of stray/example CSVs you don't intend to analyze. The interactive picker (when running with no case name) shows row count and last-modified time for each file to help tell them apart, but it's easy to select the wrong one by accident, and every result and plot title is derived from that file's name — including the bundled `Data/Template.csv` demo, which will show up in that picker alongside your own real cases.
+- Keep `Data/` tidy: each case is its own folder `Data/<CaseName>/` with a `<CaseName>.csv` baseline inside. The interactive picker (when running with no case name) lists those case folders — with row count and last-modified time — so it's easy to see what's there, though it's still worth naming cases clearly, since every result and plot title is derived from the folder name.

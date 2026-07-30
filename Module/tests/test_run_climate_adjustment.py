@@ -28,27 +28,29 @@ def test_override_cli_zero_is_respected_not_treated_as_falsy():
     assert _override(0.0, 0.30) == 0.0
 
 
-def _make_project(tmp_path, q):
-    """Minimal <root>/Data + Module skeleton with a baseline series and a
-    climate-inputs file, so project_root_from() resolves tmp_path."""
+def _make_project(tmp_path, q, scenario="rcp85"):
+    """Minimal <root>/Data + Module skeleton with a case-first baseline series
+    and a per-scenario climate-inputs file, so project_root_from() resolves
+    tmp_path. Case = 'DemoDam', scenario = <scenario>."""
     (tmp_path / "Module").mkdir()
-    (tmp_path / "Data").mkdir()
-    (tmp_path / "Data" / "Climate_Adjustment").mkdir()
-    # baseline series -- note year column FIRST, to exercise the auto-detect /
-    # unpacking path that previously mis-picked the year column as the series
+    case = tmp_path / "Data" / "DemoDam"
+    (case / "climate_adjustment").mkdir(parents=True)
+    # baseline series at Data/DemoDam/DemoDam.csv -- note year column FIRST, to
+    # exercise the auto-detect/unpacking path that previously mis-picked the
+    # year column as the series
     pd.DataFrame({"year": np.arange(1950, 1950 + q.size), "Q": q}).to_csv(
-        tmp_path / "Data" / "DemoDam.csv", index=False)
+        case / "DemoDam.csv", index=False)
     pd.DataFrame({
         "parameter": ["delta1", "delta2", "tau1", "tau2",
                       "confidence_level", "return_periods", "distribution", "pmf"],
         "value": ["0.30", "0.18", "0.10", "0.18", "95", "100,1000,10000", "gumbel", "1200"],
-    }).to_csv(tmp_path / "Data" / "Climate_Adjustment" / "DemoDam.csv", index=False)
+    }).to_csv(case / "climate_adjustment" / f"{scenario}.csv", index=False)
 
 
 def test_end_to_end_writes_outputs_with_sane_values(tmp_path, monkeypatch):
     rng = np.random.default_rng(0)
     q = rng.gumbel(500, 150, size=45)   # ~hundreds-scale flood series
-    _make_project(tmp_path, q)
+    _make_project(tmp_path, q, scenario="rcp85")
 
     # run_climate_adjustment.main() locates the project via __file__ of the
     # run script; point that at the fake project by monkeypatching the module's
@@ -58,11 +60,11 @@ def test_end_to_end_writes_outputs_with_sane_values(tmp_path, monkeypatch):
     fake_script.write_text("# placeholder")
     monkeypatch.setattr(rca, "__file__", str(fake_script))
 
-    monkeypatch.setattr(sys, "argv", ["run_climate_adjustment.py", "DemoDam"])
+    monkeypatch.setattr(sys, "argv", ["run_climate_adjustment.py", "DemoDam", "rcp85"])
     rca.main()
 
-    out_dir = tmp_path / "Output" / "DemoDam" / "Climate_Adjustment"
-    plot_dir = tmp_path / "Plot" / "DemoDam" / "Climate_Adjustment"
+    out_dir = tmp_path / "Output" / "DemoDam" / "Climate_Adjustment" / "rcp85"
+    plot_dir = tmp_path / "Plot" / "DemoDam" / "Climate_Adjustment" / "rcp85"
     csv = out_dir / "climate_adjustment_table.csv"
     summary = out_dir / "summary.txt"
     png = plot_dir / "climate_adjustment.png"
@@ -83,6 +85,7 @@ def test_end_to_end_writes_outputs_with_sane_values(tmp_path, monkeypatch):
 
     text = summary.read_text()
     assert "CLIMATE-INFORMED FLOOD ADJUSTMENT (CIFAM)" in text
+    assert "Scenario:        rcp85" in text
     # baseline mean reported in the summary must be the flood series (~hundreds),
     # not the ~1970 year mean
     assert "mean = " in text
@@ -91,7 +94,7 @@ def test_end_to_end_writes_outputs_with_sane_values(tmp_path, monkeypatch):
 def test_end_to_end_cli_override_and_no_plot(tmp_path, monkeypatch):
     rng = np.random.default_rng(1)
     q = rng.gumbel(500, 150, size=40)
-    _make_project(tmp_path, q)
+    _make_project(tmp_path, q, scenario="rcp45")
     import run_climate_adjustment as rca
     fake_script = tmp_path / "Module" / "run_climate_adjustment.py"
     fake_script.write_text("# placeholder")
@@ -99,13 +102,13 @@ def test_end_to_end_cli_override_and_no_plot(tmp_path, monkeypatch):
 
     # override delta1 on the CLI and skip the plot
     monkeypatch.setattr(sys, "argv", [
-        "run_climate_adjustment.py", "DemoDam",
+        "run_climate_adjustment.py", "DemoDam", "rcp45",
         "--delta1", "0.50", "--no-plot",
     ])
     rca.main()
 
-    out_dir = tmp_path / "Output" / "DemoDam" / "Climate_Adjustment"
-    plot_dir = tmp_path / "Plot" / "DemoDam" / "Climate_Adjustment"
+    out_dir = tmp_path / "Output" / "DemoDam" / "Climate_Adjustment" / "rcp45"
+    plot_dir = tmp_path / "Plot" / "DemoDam" / "Climate_Adjustment" / "rcp45"
     assert (out_dir / "climate_adjustment_table.csv").exists()
     # --no-plot: no PNG written
     assert not (plot_dir / "climate_adjustment.png").exists()

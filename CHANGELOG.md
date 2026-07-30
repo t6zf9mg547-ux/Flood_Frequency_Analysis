@@ -2,6 +2,59 @@
 
 All notable changes to the Flood Frequency Analysis tool are documented here.
 
+## [0.8.0] - 2026-07-30
+
+### Changed (BREAKING) — case-first `Data/` layout, multiple climate scenarios per case
+This release makes the `Data/` folder case-first, matching how `Output/` and
+`Plot/` are already organised, and lets each case hold several climate-adjustment
+scenarios. It is a **breaking change to input file locations** — existing data
+must be moved (see "Migration" below). Regional analysis is unchanged.
+
+- **Single-station baseline** moved from `Data/<CaseName>.csv` to
+  `Data/<CaseName>/<CaseName>.csv` (baseline named after its folder, by
+  convention). `resolve_case()` and `run_analysis.py`'s interactive picker now
+  work in terms of case folders under `Data/` (skipping the reserved `Templates/`
+  and `Regional/` folders).
+- **Per-case settings** moved from `Data/<CaseName>.toml` to
+  `Data/<CaseName>/<CaseName>.toml`.
+- **Climate-adjustment inputs** moved from `Data/Climate_Adjustment/<CaseName>.csv`
+  (a single file per case, v0.6.0–0.7.0) to
+  `Data/<CaseName>/climate_adjustment/<scenario>.csv` — **one file per scenario**
+  (e.g. `rcp45.csv`, `rcp85.csv`). `run_climate_adjustment.py` gains a second
+  positional argument, the scenario: `run_climate_adjustment.py <CaseName> <scenario>`
+  (either is prompted for if omitted). `resolve_climate_case()` now takes a
+  `scenario` argument and `ClimatePaths` gains a `scenario` field.
+- **Climate outputs** are now per-scenario:
+  `Output/<CaseName>/Climate_Adjustment/<scenario>/` and
+  `Plot/<CaseName>/Climate_Adjustment/<scenario>/`, so scenarios never overwrite
+  each other.
+- **Shipped examples/templates consolidated under `Data/Templates/`.** All
+  example and template files now live in one tracked subtree, which lets
+  `.gitignore` collapse its Data rules to essentially two lines: ignore all of
+  `Data/`, except `Data/Templates/` (and `Data/.gitkeep`). The earlier scattered
+  per-file exceptions (`Data/Template.csv`, `Data/Climate_Adjustment/Template.csv`,
+  `Data/Regional/Template/*.csv`, the descriptor catalogs and station-data
+  folders) are all replaced by that single subtree exception. Verified with an
+  actual `git add -A` against a reconstructed tree: only `Data/Templates/**`
+  tracks; every real case, regional data, and all outputs are ignored.
+
+### Migration (do this once, manually)
+For each existing case `<CaseName>`:
+1. `mkdir Data/<CaseName>/`
+2. move `Data/<CaseName>.csv` → `Data/<CaseName>/<CaseName>.csv`
+3. if present, move `Data/<CaseName>.toml` → `Data/<CaseName>/<CaseName>.toml`
+4. if you had a climate file `Data/Climate_Adjustment/<CaseName>.csv`, move it to
+   `Data/<CaseName>/climate_adjustment/<scenario>.csv` (pick a scenario name)
+Then move every shipped template/example under `Data/Templates/` and drop the old
+`Data/Climate_Adjustment/` folder. Nothing in `Output/` or `Plot/` needs moving
+(those are regenerated).
+
+### Tests
+- Updated `test_io_utils.py` (case-first `resolve_case`/`load_case_config` paths,
+  new `resolve_climate_case(case, scenario, ...)` assertions, plus a
+  scenarios-don't-collide test), `test_run_climate_adjustment.py` (case+scenario
+  layout and CLI args), and `test_climate_adjustment.py` (end-to-end).
+
 ## [0.7.0] - 2026-07-30
 
 ### Added — CIFAM command-line entry point (`run_climate_adjustment.py`) + Figure-4-style plot

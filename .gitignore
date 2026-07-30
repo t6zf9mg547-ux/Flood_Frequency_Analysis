@@ -35,27 +35,15 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
-# Input data -- kept locally only, not tracked in git, EXCEPT the bundled
-# example/template files below (shipped so a fresh clone/checkout has
-# something to try immediately -- without these exceptions, everything
-# under Data/ would be silently excluded, templates included, even though
-# they're meant to ship with the repo)
+# Input data -- kept locally only, not tracked in git, EXCEPT the shipped
+# example/template files, which ALL live under Data/Templates/ (case-first
+# layout, v0.8.0). A real case is Data/<CaseName>/... and is never tracked;
+# only Data/Templates/ ships with the repo, so a fresh clone has something to
+# try immediately. This one exception subtree replaces the earlier scattered
+# per-file exceptions.
 /Data/*
 !/Data/.gitkeep
-!/Data/Template.csv
 !/Data/Templates/
-!/Data/Templates/*.csv
-!/Data/Templates/discharge_station_data/
-!/Data/Templates/discharge_station_data/*.csv
-!/Data/Templates/rainfall_station_data/
-!/Data/Templates/rainfall_station_data/*.csv
-!/Data/Regional/
-/Data/Regional/*
-!/Data/Regional/Template/
-!/Data/Regional/Template/*.csv
-!/Data/Climate_Adjustment/
-/Data/Climate_Adjustment/*
-!/Data/Climate_Adjustment/Template.csv
 
 # Generated output -- regenerated locally, not tracked in git
 /Output/*

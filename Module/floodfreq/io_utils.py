@@ -55,29 +55,30 @@ class ClimatePaths:
     """Standard path layout for one climate-informed (CIFAM) adjustment case:
 
         <project_root>/
-            Data/<CaseName>.csv                       - baseline annual-maximum series
-                                                        (reused from the single-station
-                                                        tool -- NOT duplicated)
-            Data/Climate_Adjustment/<CaseName>.csv    - the four climate inputs
-                                                        (delta1/delta2/tau1/tau2) + options
-            Output/<CaseName>/Climate_Adjustment/     - CSV outputs for this case
-            Plot/<CaseName>/Climate_Adjustment/       - PNG plots for this case
+            Data/<CaseName>/<CaseName>.csv                      - baseline series
+                                                                  (reused from the
+                                                                  single-station tool)
+            Data/<CaseName>/climate_adjustment/<scenario>.csv   - one climate-input
+                                                                  file per scenario
+            Output/<CaseName>/Climate_Adjustment/<scenario>/    - CSV outputs
+            Plot/<CaseName>/Climate_Adjustment/<scenario>/      - PNG plots
 
-    Outputs are CASE-FIRST (nested under the same Output/<CaseName>/ and
-    Plot/<CaseName>/ that run_analysis.py creates), so a case's baseline
-    results and its climate adjustment sit together. The input stays
-    analysis-type-first (Data/Climate_Adjustment/) so its shipped template and
-    gitignore exception are unaffected. See resolve_climate_case for why this
-    asymmetry is deliberate. The baseline series lives at the ordinary
-    single-station location so a case already analysed with run_analysis.py
-    needs no data duplication; only the small climate-inputs file is new.
+    Everything is CASE-FIRST and, within a case, one <scenario> per climate
+    input file, so several scenarios (e.g. rcp45, rcp85, wet, dry) coexist
+    without overwriting each other's outputs. The baseline series is the same
+    file the single-station tool uses (Data/<CaseName>/<CaseName>.csv), so a
+    case already analysed with run_analysis.py needs no data duplication.
+    Regional analysis stays analysis-type-first (Output/Regional/<RegionName>/)
+    on purpose: a region isn't a single case, whereas a climate adjustment is
+    an extension of one.
     """
     case_name: str
+    scenario: str
     project_root: Path
-    baseline_csv: Path       # Data/<CaseName>.csv                    (baseline series)
-    climate_csv: Path        # Data/Climate_Adjustment/<CaseName>.csv (the 4 params)
-    output_dir: Path         # Output/<CaseName>/Climate_Adjustment/
-    plot_dir: Path           # Plot/<CaseName>/Climate_Adjustment/
+    baseline_csv: Path       # Data/<CaseName>/<CaseName>.csv                    (baseline)
+    climate_csv: Path        # Data/<CaseName>/climate_adjustment/<scenario>.csv (the 4 params)
+    output_dir: Path         # Output/<CaseName>/Climate_Adjustment/<scenario>/
+    plot_dir: Path           # Plot/<CaseName>/Climate_Adjustment/<scenario>/
 
 
 def project_root_from(module_file) -> Path:
@@ -99,9 +100,16 @@ def resolve_case(case_name: str, module_file) -> CasePaths:
     """
     Resolve the standard Data/Module/Output/Plot paths for one case, and
     create Output/<CaseName>/ and Plot/<CaseName>/ if they don't exist yet.
+
+    Case-first Data layout (v0.8.0): each case owns a folder
+    Data/<CaseName>/ containing its baseline series Data/<CaseName>/<CaseName>.csv
+    (named after the folder, by convention) and, optionally, a per-case
+    settings file Data/<CaseName>/<CaseName>.toml and a
+    Data/<CaseName>/climate_adjustment/ subfolder (see resolve_climate_case).
+    This mirrors the case-first Output/<CaseName>/ and Plot/<CaseName>/ trees.
     """
     root = project_root_from(module_file)
-    data_csv = root / "Data" / f"{case_name}.csv"
+    data_csv = root / "Data" / case_name / f"{case_name}.csv"
     output_dir = root / "Output" / case_name
     plot_dir = root / "Plot" / case_name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -125,39 +133,35 @@ def resolve_region(region_name: str, module_file) -> RegionPaths:
     return RegionPaths(region_name, root, data_dir, output_dir, plot_dir)
 
 
-def resolve_climate_case(case_name: str, module_file) -> ClimatePaths:
+def resolve_climate_case(case_name: str, scenario: str, module_file) -> ClimatePaths:
     """
     Resolve the standard paths for one climate-informed (CIFAM) adjustment
-    case and create Output/<CaseName>/Climate_Adjustment/ and
-    Plot/<CaseName>/Climate_Adjustment/ if they don't exist yet.
+    scenario of one case, and create the per-scenario output/plot dirs.
 
-    Outputs are CASE-FIRST -- nested under the same Output/<CaseName>/ and
-    Plot/<CaseName>/ that run_analysis.py already creates for the baseline
-    single-station analysis -- so everything for one case (baseline results
-    plus its climate adjustment) lives together under one <CaseName> folder.
-    This differs from Regional analysis (Output/Regional/<RegionName>/,
-    analysis-type-first) on purpose: CIFAM is an extension of a single case
-    and reuses that case's Data/<CaseName>.csv, whereas a region is its own
-    top-level unit.
+    Case-first, scenario-nested (v0.8.0):
+        baseline   Data/<CaseName>/<CaseName>.csv           (reused as-is)
+        inputs     Data/<CaseName>/climate_adjustment/<scenario>.csv
+        outputs    Output/<CaseName>/Climate_Adjustment/<scenario>/
+        plots      Plot/<CaseName>/Climate_Adjustment/<scenario>/
 
-    The baseline series is read from the ordinary single-station location,
-    Data/<CaseName>.csv, so a case already set up for run_analysis.py needs
-    no data duplication. The only new input is the four climate numbers at
-    Data/Climate_Adjustment/<CaseName>.csv -- kept analysis-type-first so its
-    shipped Template.csv and its single .gitignore exception stay put (see
-    load_climate_inputs and Data/Climate_Adjustment/Template.csv).
+    Several scenarios per case (rcp45, rcp85, ...) coexist without clobbering
+    each other's outputs. The baseline is the single-station input, so no
+    duplication. Regional analysis stays analysis-type-first
+    (Output/Regional/<RegionName>/) on purpose: a region isn't a single case,
+    whereas a climate adjustment is an extension of one.
     """
     root = project_root_from(module_file)
-    baseline_csv = root / "Data" / f"{case_name}.csv"
-    climate_csv = root / "Data" / "Climate_Adjustment" / f"{case_name}.csv"
-    output_dir = root / "Output" / case_name / "Climate_Adjustment"
-    plot_dir = root / "Plot" / case_name / "Climate_Adjustment"
+    baseline_csv = root / "Data" / case_name / f"{case_name}.csv"
+    climate_csv = root / "Data" / case_name / "climate_adjustment" / f"{scenario}.csv"
+    output_dir = root / "Output" / case_name / "Climate_Adjustment" / scenario
+    plot_dir = root / "Plot" / case_name / "Climate_Adjustment" / scenario
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_dir.mkdir(parents=True, exist_ok=True)
-    return ClimatePaths(case_name, root, baseline_csv, climate_csv, output_dir, plot_dir)
+    return ClimatePaths(case_name, scenario, root, baseline_csv, climate_csv,
+                        output_dir, plot_dir)
 
 
-# Keys expected in a Data/Climate_Adjustment/<CaseName>.csv inputs file.
+# Keys expected in a Data/<CaseName>/climate_adjustment/<scenario>.csv inputs file.
 _CLIMATE_REQUIRED = ("delta1", "delta2", "tau1", "tau2")
 _CLIMATE_OPTIONAL_DEFAULTS = {
     "confidence_level": 95.0,
@@ -186,7 +190,7 @@ def load_climate_inputs(path) -> dict:
     long "one parameter per row" format (rather than a single wide header
     row) is used so the description column can travel with each value --
     consistent with how the descriptor-catalog templates are laid out, and
-    friendlier for a non-developer duplicating Template.csv per scenario.
+    friendlier for a non-developer duplicating a template per scenario.
 
     delta1/delta2/tau1/tau2 are REQUIRED and are FRACTIONS (0.30 == +30%);
     a common mistake is entering 30 (meaning percent) -- values with
@@ -198,15 +202,15 @@ def load_climate_inputs(path) -> dict:
     if not Path(path).exists():
         raise FileNotFoundError(
             f"Climate inputs file not found: {path}\n"
-            f"Duplicate Data/Climate_Adjustment/Template.csv to "
-            f"Data/Climate_Adjustment/<CaseName>.csv and edit the four "
-            f"delta/tau values."
+            f"Copy a climate-adjustment template from Data/Templates/ into "
+            f"Data/<CaseName>/climate_adjustment/<scenario>.csv and edit the "
+            f"four delta/tau values."
         )
     df = pd.read_csv(path)
     if "parameter" not in df.columns or "value" not in df.columns:
         raise ValueError(
             f"{path} must have 'parameter' and 'value' columns "
-            f"(see Data/Climate_Adjustment/Template.csv)."
+            f"(see the climate-adjustment template in Data/Templates/)."
         )
     raw = {str(k).strip(): v for k, v in zip(df["parameter"], df["value"])}
 
@@ -288,9 +292,9 @@ def load_region_stations(paths: RegionPaths, value_col=None, year_col=None):
 
 def load_case_config(case_name: str, project_root: Path) -> dict:
     """
-    Read optional per-case settings from Data/<CaseName>.toml, if it exists.
-    Returns {} if the file doesn't exist (config is entirely optional; a
-    case with no .toml behaves exactly as it always has).
+    Read optional per-case settings from Data/<CaseName>/<CaseName>.toml, if
+    it exists. Returns {} if the file doesn't exist (config is entirely
+    optional; a case with no .toml behaves exactly as it always has).
 
     Recognized keys mirror run_analysis.py's CLI flag names (with dashes
     replaced by underscores, as TOML keys can't contain dashes as bare
@@ -301,7 +305,7 @@ def load_case_config(case_name: str, project_root: Path) -> dict:
     so a config file can be extended later without breaking older runs of
     the tool against it.
     """
-    config_path = project_root / "Data" / f"{case_name}.toml"
+    config_path = project_root / "Data" / case_name / f"{case_name}.toml"
     if not config_path.exists():
         return {}
     try:

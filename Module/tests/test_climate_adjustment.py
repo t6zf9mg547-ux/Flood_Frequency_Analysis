@@ -330,33 +330,33 @@ def test_to_frame_roundtrip():
 # (d) End-to-end via the io_utils template loader                             #
 # --------------------------------------------------------------------------- #
 def test_end_to_end_from_climate_inputs_file(tmp_path):
-    """Baseline series + a Data/Climate_Adjustment/<CaseName>.csv inputs file
-    flow through resolve_climate_case + load_climate_inputs into
+    """Baseline series + a Data/<CaseName>/climate_adjustment/<scenario>.csv
+    inputs file flow through resolve_climate_case + load_climate_inputs into
     climate_adjusted_quantiles, matching a direct call with the same numbers."""
     import pandas as pd
     from floodfreq.io_utils import (
         resolve_climate_case, load_climate_inputs, read_series,
     )
     # fake project skeleton
-    (tmp_path / "Data").mkdir()
     (tmp_path / "Module").mkdir()
     module_file = tmp_path / "Module" / "run_analysis.py"
 
-    # baseline series at the ordinary single-station location
+    # case-first baseline series at Data/<CaseName>/<CaseName>.csv
+    case = tmp_path / "Data" / "DemoCase"
+    (case / "climate_adjustment").mkdir(parents=True)
     rng = np.random.default_rng(0)
     q = rng.gumbel(900, 400, size=50)
     pd.DataFrame({"year": np.arange(1970, 1970 + q.size), "Q": q}).to_csv(
-        tmp_path / "Data" / "DemoCase.csv", index=False)
+        case / "DemoCase.csv", index=False)
 
-    # climate inputs file under the Climate_Adjustment namespace
-    (tmp_path / "Data" / "Climate_Adjustment").mkdir()
+    # climate inputs for one scenario
     pd.DataFrame({
         "parameter": ["delta1", "delta2", "tau1", "tau2",
                       "confidence_level", "return_periods", "distribution"],
         "value": ["0.30", "0.18", "0.10", "0.18", "95", "100,1000,10000", "gumbel"],
-    }).to_csv(tmp_path / "Data" / "Climate_Adjustment" / "DemoCase.csv", index=False)
+    }).to_csv(case / "climate_adjustment" / "rcp85.csv", index=False)
 
-    paths = resolve_climate_case("DemoCase", module_file)
+    paths = resolve_climate_case("DemoCase", "rcp85", module_file)
     Q, years = read_series(paths.baseline_csv)
     # read_series returns (values, years) in THAT order -- guard against a
     # swap: the flood series must be the ~900-scale gumbel draws, not the

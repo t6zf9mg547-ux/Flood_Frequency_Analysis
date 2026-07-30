@@ -65,16 +65,16 @@ def test_load_case_config_missing_file_returns_empty(tmp_path):
 
 
 def test_load_case_config_reads_valid_toml(tmp_path):
-    (tmp_path / "Data").mkdir()
-    (tmp_path / "Data" / "MyCase.toml").write_text(
+    (tmp_path / "Data" / "MyCase").mkdir(parents=True)
+    (tmp_path / "Data" / "MyCase" / "MyCase.toml").write_text(
         'confidence_level = 90\nregional_skew = 0.0\npdf_report = true\n')
     config = load_case_config("MyCase", tmp_path)
     assert config == {"confidence_level": 90, "regional_skew": 0.0, "pdf_report": True}
 
 
 def test_load_case_config_malformed_toml_raises_clear_error(tmp_path):
-    (tmp_path / "Data").mkdir()
-    (tmp_path / "Data" / "Broken.toml").write_text("this is not valid toml {{{")
+    (tmp_path / "Data" / "Broken").mkdir(parents=True)
+    (tmp_path / "Data" / "Broken" / "Broken.toml").write_text("this is not valid toml {{{")
     with pytest.raises(ValueError, match="Broken.toml"):
         load_case_config("Broken", tmp_path)
 
@@ -169,21 +169,34 @@ def _climate_template_rows():
 
 def test_resolve_climate_case_builds_expected_paths_and_creates_output_dirs(tmp_path):
     module_file = _make_fake_project(tmp_path)
-    paths = resolve_climate_case("LomPangar", module_file)
+    paths = resolve_climate_case("LomPangar", "rcp85", module_file)
     assert paths.case_name == "LomPangar"
+    assert paths.scenario == "rcp85"
     assert paths.project_root == tmp_path
-    # baseline series reused from the ordinary single-station location
-    assert paths.baseline_csv == tmp_path / "Data" / "LomPangar.csv"
-    # the four climate numbers live under the Climate_Adjustment namespace
-    assert paths.climate_csv == tmp_path / "Data" / "Climate_Adjustment" / "LomPangar.csv"
-    assert paths.output_dir == tmp_path / "Output" / "LomPangar" / "Climate_Adjustment"
-    assert paths.plot_dir == tmp_path / "Plot" / "LomPangar" / "Climate_Adjustment"
+    # baseline series reused from the case-first single-station location
+    assert paths.baseline_csv == tmp_path / "Data" / "LomPangar" / "LomPangar.csv"
+    # the four climate numbers live in the case's climate_adjustment/ subfolder,
+    # one file per scenario
+    assert paths.climate_csv == (tmp_path / "Data" / "LomPangar"
+                                 / "climate_adjustment" / "rcp85.csv")
+    # outputs are case-first AND scenario-nested (scenarios don't collide)
+    assert paths.output_dir == tmp_path / "Output" / "LomPangar" / "Climate_Adjustment" / "rcp85"
+    assert paths.plot_dir == tmp_path / "Plot" / "LomPangar" / "Climate_Adjustment" / "rcp85"
     # output/plot dirs created eagerly (mirrors resolve_case / resolve_region)
     assert paths.output_dir.is_dir()
     assert paths.plot_dir.is_dir()
     # neither input file is created by the resolver -- they must be supplied
     assert not paths.baseline_csv.exists()
     assert not paths.climate_csv.exists()
+
+
+def test_resolve_climate_case_scenarios_do_not_collide(tmp_path):
+    module_file = _make_fake_project(tmp_path)
+    p45 = resolve_climate_case("Dam", "rcp45", module_file)
+    p85 = resolve_climate_case("Dam", "rcp85", module_file)
+    assert p45.output_dir != p85.output_dir
+    assert p45.climate_csv != p85.climate_csv
+    assert p45.baseline_csv == p85.baseline_csv  # same baseline, different scenarios
 
 
 def test_load_climate_inputs_parses_all_fields(tmp_path):

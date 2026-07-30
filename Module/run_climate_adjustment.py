@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run a CIFAM climate-informed flood adjustment for one case.
+Run a CIFAM climate-informed flood adjustment for one case and scenario.
 
 Implements the rapid Climate-Informed Flood Assessment Methodology (CIFAM) of
 Grijsen & Lino (ICOLD 2026): takes a baseline single-station annual-maximum
@@ -11,30 +11,31 @@ climate-change uncertainty.
 Layout expected (this script lives in <project_root>/Module/):
 
     <project_root>/
-        Data/<CaseName>.csv                       <- baseline annual-maximum series
-                                                     (the SAME file run_analysis.py uses)
-        Data/Climate_Adjustment/<CaseName>.csv    <- the four climate numbers (+ options)
-        Data/Climate_Adjustment/Template.csv      <- duplicate this to set up a case
-        Module/run_climate_adjustment.py          <- this file
-        Module/floodfreq/                         <- the package
-        Output/<CaseName>/Climate_Adjustment/     <- CSV + summary.txt written here
-        Plot/<CaseName>/Climate_Adjustment/       <- PNG plot written here
+        Data/<CaseName>/<CaseName>.csv                        <- baseline series
+                                                                 (the SAME file run_analysis.py uses)
+        Data/<CaseName>/climate_adjustment/<scenario>.csv     <- climate numbers for one scenario
+        Data/Templates/                                       <- shipped example templates
+        Module/run_climate_adjustment.py                      <- this file
+        Module/floodfreq/                                     <- the package
+        Output/<CaseName>/Climate_Adjustment/<scenario>/      <- CSV + summary.txt written here
+        Plot/<CaseName>/Climate_Adjustment/<scenario>/        <- PNG plot written here
 
-Setup: duplicate Data/Climate_Adjustment/Template.csv to
-Data/Climate_Adjustment/<CaseName>.csv (using the same <CaseName> as your
-existing Data/<CaseName>.csv baseline series) and edit the four
-delta1/delta2/tau1/tau2 values. See the README's "Climate-informed
-adjustment (CIFAM)" section.
+Setup: copy a climate-adjustment template from Data/Templates/ into
+Data/<CaseName>/climate_adjustment/<scenario>.csv (one file per scenario, e.g.
+rcp45.csv, rcp85.csv) and edit the four delta1/delta2/tau1/tau2 values. The
+baseline series is the same Data/<CaseName>/<CaseName>.csv the single-station
+tool uses. See the README's "Climate-informed adjustment (CIFAM)" section.
 
 Usage:
-    python run_climate_adjustment.py LomPangar
-    python run_climate_adjustment.py LomPangar --distribution lognormal2
-    python run_climate_adjustment.py LomPangar --method monte-carlo --n-sim 50000
-    python run_climate_adjustment.py LomPangar --confidence-level 90 --no-plot
-    python run_climate_adjustment.py LomPangar --delta1 0.30 --delta2 0.18 --tau1 0.10 --tau2 0.18
+    python run_climate_adjustment.py LomPangar rcp85
+    python run_climate_adjustment.py LomPangar rcp85 --distribution lognormal2
+    python run_climate_adjustment.py LomPangar rcp85 --method monte-carlo --n-sim 50000
+    python run_climate_adjustment.py LomPangar rcp85 --confidence-level 90 --no-plot
+    python run_climate_adjustment.py LomPangar rcp85 --delta1 0.30 --delta2 0.18 --tau1 0.10 --tau2 0.18
 
+If <CaseName> and/or <scenario> are omitted you'll be prompted to pick them.
 CLI flags override the corresponding values read from the inputs file, so a
-one-off scenario can be run without editing the CSV.
+one-off variation can be run without editing the CSV.
 """
 from __future__ import annotations
 import argparse
@@ -87,39 +88,76 @@ def _csv_hint(path: Path) -> str:
 
 def prompt_case_name(project_root: Path) -> str:
     """
-    List every CSV in Data/Climate_Adjustment/ and let the user pick one.
-    Used when case_name isn't passed on the command line. Template.csv is
-    listed too -- it's a runnable worked example (the Lom Pangar numbers),
-    unlike the single-station picker where Template.csv is a real demo case.
+    List Data/ case folders that have a climate_adjustment/ subfolder and let
+    the user pick one. Used when case_name isn't passed on the command line.
+    Reserved folders (Templates/, Regional/) are skipped.
     """
-    data_dir = project_root / "Data" / "Climate_Adjustment"
-    if not data_dir.is_dir():
-        sys.exit(f"ERROR: {data_dir} does not exist. Duplicate "
-                 f"Data/Climate_Adjustment/Template.csv to "
-                 f"Data/Climate_Adjustment/<CaseName>.csv first.")
-    csvs = sorted(data_dir.glob("*.csv"))
+    data_dir = project_root / "Data"
+    reserved = {"Templates", "Regional"}
+    cases = sorted(
+        d for d in data_dir.iterdir()
+        if d.is_dir() and d.name not in reserved
+        and (d / "climate_adjustment").is_dir()
+        and any((d / "climate_adjustment").glob("*.csv"))
+    ) if data_dir.is_dir() else []
+    if not cases:
+        sys.exit(f"ERROR: no cases with a climate_adjustment/ folder found in "
+                 f"{data_dir}. Create Data/<CaseName>/climate_adjustment/"
+                 f"<scenario>.csv (copy a template from Data/Templates/) first.")
+
+    if len(cases) == 1:
+        only = cases[0]
+        raw = input(f"Found one case with scenarios: {only.name} — use it? "
+                    f"[Y/n]: ").strip().lower()
+        if raw in ("", "y", "yes"):
+            return only.name
+
+    print(f"\nCases with climate scenarios in {data_dir}:")
+    for i, d in enumerate(cases, start=1):
+        n = len(list((d / "climate_adjustment").glob("*.csv")))
+        print(f"  {i}. {d.name}  ({n} scenario{'s' if n != 1 else ''})")
+    while True:
+        raw = input(f"Choose a case [1-{len(cases)}] or type a case name: ").strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(cases):
+            return cases[int(raw) - 1].name
+        if (data_dir / raw / "climate_adjustment").is_dir():
+            return raw
+        print(f"  Not a valid choice. Enter a number 1-{len(cases)}, or an exact case name.")
+
+
+def prompt_scenario(project_root: Path, case_name: str) -> str:
+    """
+    List the scenario CSVs in Data/<CaseName>/climate_adjustment/ and let the
+    user pick one. Used when the scenario isn't passed on the command line.
+    """
+    scen_dir = project_root / "Data" / case_name / "climate_adjustment"
+    if not scen_dir.is_dir():
+        sys.exit(f"ERROR: {scen_dir} does not exist. Copy a climate-adjustment "
+                 f"template from Data/Templates/ into "
+                 f"Data/{case_name}/climate_adjustment/<scenario>.csv first.")
+    csvs = sorted(scen_dir.glob("*.csv"))
     if not csvs:
-        sys.exit(f"ERROR: no .csv files found in {data_dir}. Duplicate "
-                 f"Template.csv to <CaseName>.csv and edit the four values.")
+        sys.exit(f"ERROR: no scenario .csv files in {scen_dir}. Add one "
+                 f"(copy a template from Data/Templates/) and edit the four values.")
 
     if len(csvs) == 1:
         only = csvs[0]
-        raw = input(f"Found one climate-inputs file: {only.name} "
+        raw = input(f"Found one scenario: {only.stem} "
                     f"({_csv_hint(only)}) — use it? [Y/n]: ").strip().lower()
         if raw in ("", "y", "yes"):
             return only.stem
 
-    print(f"\nAvailable climate-inputs files in {data_dir}:")
+    print(f"\nScenarios in {scen_dir}:")
     for i, f in enumerate(csvs, start=1):
-        print(f"  {i}. {f.name}  ({_csv_hint(f)})")
+        print(f"  {i}. {f.stem}  ({_csv_hint(f)})")
     while True:
-        raw = input(f"Choose a file [1-{len(csvs)}] or type a case name: ").strip()
+        raw = input(f"Choose a scenario [1-{len(csvs)}] or type its name: ").strip()
         if raw.isdigit() and 1 <= int(raw) <= len(csvs):
             return csvs[int(raw) - 1].stem
         candidate = raw[:-4] if raw.lower().endswith(".csv") else raw
-        if (data_dir / f"{candidate}.csv").exists():
+        if (scen_dir / f"{candidate}.csv").exists():
             return candidate
-        print(f"  Not a valid choice. Enter a number 1-{len(csvs)}, or an exact case name.")
+        print(f"  Not a valid choice. Enter a number 1-{len(csvs)}, or an exact scenario name.")
 
 
 def _override(cli_value, file_value):
@@ -131,8 +169,12 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("case_name", nargs="?", default=None,
-                   help="Case name; reads Data/<CaseName>.csv (baseline) and "
-                        "Data/Climate_Adjustment/<CaseName>.csv (climate inputs). "
+                   help="Case name; reads Data/<CaseName>/<CaseName>.csv (baseline). "
+                        "If omitted, you'll be prompted to pick one.")
+    p.add_argument("scenario", nargs="?", default=None,
+                   help="Scenario name; reads "
+                        "Data/<CaseName>/climate_adjustment/<scenario>.csv (climate inputs) "
+                        "and writes to Output/<CaseName>/Climate_Adjustment/<scenario>/. "
                         "If omitted, you'll be prompted to pick one.")
     p.add_argument("--value-col", default=None,
                    help="Column name of the flood series in the baseline CSV (auto-detected if omitted)")
@@ -168,14 +210,17 @@ def parse_args():
 def main():
     args = parse_args()
     case_name = args.case_name
+    scenario = args.scenario
 
-    # Resolve paths first (needs a project root); if no case name, pick one.
+    # Resolve paths first (needs a project root); prompt for case/scenario if missing.
     from floodfreq.io_utils import project_root_from
     project_root = project_root_from(__file__)
     if case_name is None:
         case_name = prompt_case_name(project_root)
+    if scenario is None:
+        scenario = prompt_scenario(project_root, case_name)
 
-    paths = resolve_climate_case(case_name, __file__)
+    paths = resolve_climate_case(case_name, scenario, __file__)
 
     # -- baseline series --
     if not paths.baseline_csv.exists():
@@ -202,7 +247,7 @@ def main():
     units = args.units
     short_name = args.short_name or "Flood"
 
-    print(f"\nClimate-informed flood adjustment (CIFAM) for case '{case_name}'")
+    print(f"\nClimate-informed flood adjustment (CIFAM) for case '{case_name}', scenario '{scenario}'")
     print(f"  baseline series : {paths.baseline_csv}  (N = {Q.size})")
     print(f"  climate inputs  : {paths.climate_csv}")
     print(f"  distribution    : {distribution}   method: {args.method}")
@@ -230,7 +275,7 @@ def main():
     print(f"\nResults table written to {csv_path}")
 
     summary = build_provenance_header()
-    summary += _format_summary(case_name, result, args.method, delta1, delta2,
+    summary += _format_summary(case_name, scenario, result, args.method, delta1, delta2,
                                tau1, tau2, pmf, Q, distribution)
     summary_path = paths.output_dir / "summary.txt"
     summary_path.write_text(summary)
@@ -247,7 +292,7 @@ def main():
     print("\nDone.")
 
 
-def _format_summary(case_name, result, method, delta1, delta2, tau1, tau2,
+def _format_summary(case_name, scenario, result, method, delta1, delta2, tau1, tau2,
                     pmf, Q, distribution) -> str:
     from floodfreq.distributions import DISTRIBUTIONS
     lines = [
@@ -255,6 +300,7 @@ def _format_summary(case_name, result, method, delta1, delta2, tau1, tau2,
         "Grijsen & Lino, ICOLD 2026",
         "=" * 70,
         f"Case:            {case_name}",
+        f"Scenario:        {scenario}",
         f"Distribution:    {DISTRIBUTIONS[distribution]['label']}",
         f"Method:          {method}",
         f"Baseline record: N = {Q.size}, mean = {Q.mean():.1f}, std = {Q.std():.1f}",

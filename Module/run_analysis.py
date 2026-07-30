@@ -5,7 +5,7 @@ Run a full flood frequency analysis for one case.
 Layout expected (this script lives in <project_root>/Module/):
 
     <project_root>/
-        Data/<CaseName>.csv
+        Data/<CaseName>/<CaseName>.csv
         Module/run_analysis.py   <- this file
         Module/floodfreq/        <- the package
         Output/<CaseName>/       <- CSV results written here
@@ -83,41 +83,50 @@ def _csv_hint(path: Path) -> str:
 
 def prompt_case_name(project_root: Path) -> str:
     """
-    List every CSV in Data/ and let the user pick one interactively.
+    List every case folder in Data/ and let the user pick one interactively.
     Used when case_name isn't passed on the command line (e.g. when running
     the script directly from an editor's "Run" button).
+
+    Case-first layout (v0.8.0): a case is a folder Data/<CaseName>/ containing
+    a baseline series Data/<CaseName>/<CaseName>.csv. The reserved folders
+    Templates/ (shipped examples) and Regional/ (regional analysis) are not
+    cases and are skipped.
     """
     data_dir = project_root / "Data"
-    csvs = sorted(data_dir.glob("*.csv"))
-    if not csvs:
-        sys.exit(f"ERROR: no .csv files found in {data_dir}. "
-                  f"Add a file there (e.g. Data/<CaseName>.csv) and try again.")
+    reserved = {"Templates", "Regional"}
+    cases = sorted(
+        d for d in data_dir.iterdir()
+        if d.is_dir() and d.name not in reserved and (d / f"{d.name}.csv").exists()
+    ) if data_dir.is_dir() else []
+    if not cases:
+        sys.exit(f"ERROR: no case folders found in {data_dir}. "
+                 f"Create Data/<CaseName>/<CaseName>.csv and try again.")
 
-    if len(csvs) == 1:
-        only = csvs[0]
-        raw = input(f"Found one input file: {only.name} ({_csv_hint(only)}) — use it? [Y/n]: ").strip().lower()
+    if len(cases) == 1:
+        only = cases[0]
+        raw = input(f"Found one case: {only.name} "
+                    f"({_csv_hint(only / f'{only.name}.csv')}) — use it? [Y/n]: ").strip().lower()
         if raw in ("", "y", "yes"):
-            return only.stem
+            return only.name
         # fall through to the full picker if they said no
 
-    print(f"\nAvailable input files in {data_dir}:")
-    for i, f in enumerate(csvs, start=1):
-        print(f"  {i}. {f.name}  ({_csv_hint(f)})")
+    print(f"\nAvailable cases in {data_dir}:")
+    for i, d in enumerate(cases, start=1):
+        print(f"  {i}. {d.name}  ({_csv_hint(d / f'{d.name}.csv')})")
 
     while True:
-        raw = input(f"Choose a file [1-{len(csvs)}] or type a case name: ").strip()
-        if raw.isdigit() and 1 <= int(raw) <= len(csvs):
-            return csvs[int(raw) - 1].stem
-        # allow typing the case name directly (with or without .csv)
-        candidate = raw[:-4] if raw.lower().endswith(".csv") else raw
-        if (data_dir / f"{candidate}.csv").exists():
+        raw = input(f"Choose a case [1-{len(cases)}] or type a case name: ").strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(cases):
+            return cases[int(raw) - 1].name
+        candidate = raw
+        if (data_dir / candidate / f"{candidate}.csv").exists():
             return candidate
-        print(f"  Not a valid choice. Enter a number 1-{len(csvs)}, or an exact case name.")
+        print(f"  Not a valid choice. Enter a number 1-{len(cases)}, or an exact case name.")
 
 
 def resolve_setting(cli_value, config: dict, key: str, hardcoded_default):
     """
-    Precedence: an explicit CLI flag wins, then the per-case Data/<CaseName>.toml
+    Precedence: an explicit CLI flag wins, then the per-case Data/<CaseName>/<CaseName>.toml
     config file, then the hardcoded default. `cli_value` must be None when the
     flag wasn't passed on the command line (all mergeable CLI flags default to
     None for exactly this reason).
@@ -161,7 +170,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("case_name", nargs="?", default=None,
-                    help="Case name; expects Data/<CaseName>.csv to exist. "
+                    help="Case name; expects Data/<CaseName>/<CaseName>.csv to exist. "
                          "If omitted, you'll be prompted to pick from Data/ interactively.")
     p.add_argument("--value-col", default=None, help="Column name of the flood series (auto-detected if omitted)")
     p.add_argument("--year-col", default=None, help="Column name of the year index (auto-detected if omitted)")
@@ -232,7 +241,7 @@ def main():
         config = load_case_config(case_name, paths.project_root)
     except ValueError as e:
         sys.exit(f"ERROR: {e}")
-    config_path = paths.project_root / "Data" / f"{case_name}.toml"
+    config_path = paths.project_root / "Data" / case_name / f"{case_name}.toml"
     if config:
         print(f"Using settings from {config_path} (CLI flags, if any, take precedence).")
 
