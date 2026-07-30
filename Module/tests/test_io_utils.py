@@ -1,6 +1,9 @@
 import pandas as pd
 import pytest
-from floodfreq.io_utils import read_series, load_case_config, resolve_region, load_region_stations
+from floodfreq.io_utils import (
+    read_series, load_case_config, resolve_region, load_region_stations,
+    resolve_climate_case, load_climate_inputs,
+)
 
 
 def test_reads_valid_csv(tmp_path):
@@ -147,3 +150,107 @@ def test_load_region_stations_empty_dir_raises(tmp_path):
     paths.data_dir.mkdir(parents=True)
     with pytest.raises(ValueError, match="No station CSVs found"):
         load_region_stations(paths)
+
+# -- resolve_climate_case / load_climate_inputs (CIFAM) -- #
+
+def _climate_template_rows():
+    """The canonical long-format rows, mirroring Data/Climate_Adjustment/Template.csv."""
+    return pd.DataFrame({
+        "parameter": ["delta1", "delta2", "tau1", "tau2", "confidence_level",
+                      "return_periods", "distribution", "pmf"],
+        "value": ["0.30", "0.18", "0.10", "0.18", "95",
+                  "2,10,100,1000,10000", "gumbel", ""],
+        "units": ["fraction", "fraction", "fraction", "fraction", "percent",
+                  "years", "name", "m3/s"],
+        "description": ["mean shift", "mean shift sd", "sd shift", "sd shift sd",
+                        "CI level", "return periods", "dist", "optional PMF"],
+    })
+
+
+def test_resolve_climate_case_builds_expected_paths_and_creates_output_dirs(tmp_path):
+    module_file = _make_fake_project(tmp_path)
+    paths = resolve_climate_case("LomPangar", module_file)
+    assert paths.case_name == "LomPangar"
+    assert paths.project_root == tmp_path
+    # baseline series reused from the ordinary single-station location
+    assert paths.baseline_csv == tmp_path / "Data" / "LomPangar.csv"
+    # the four climate numbers live under the Climate_Adjustment namespace
+    assert paths.climate_csv == tmp_path / "Data" / "Climate_Adjustment" / "LomPangar.csv"
+    assert paths.output_dir == tmp_path / "Output" / "Climate_Adjustment" / "LomPangar"
+    assert paths.plot_dir == tmp_path / "Plot" / "Climate_Adjustment" / "LomPangar"
+    # output/plot dirs created eagerly (mirrors resolve_case / resolve_region)
+    assert paths.output_dir.is_dir()
+    assert paths.plot_dir.is_dir()
+    # neither input file is created by the resolver -- they must be supplied
+    assert not paths.baseline_csv.exists()
+    assert not paths.climate_csv.exists()
+
+
+def test_load_climate_inputs_parses_all_fields(tmp_path):
+    p = tmp_path / "case.csv"
+    _climate_template_rows().to_csv(p, index=False)
+    ci = load_climate_inputs(p)
+    assert ci["delta1"] == pytest.approx(0.30)
+    assert ci["delta2"] == pytest.approx(0.18)
+    assert ci["tau1"] == pytest.approx(0.10)
+    assert ci["tau2"] == pytest.approx(0.18)
+    assert ci["confidence_level"] == pytest.approx(95.0)
+    assert ci["distribution"] == "gumbel"
+    assert ci["return_periods"] == (2.0, 10.0, 100.0, 1000.0, 10000.0)
+    assert ci["pmf"] is None
+
+
+def test_load_climate_inputs_optional_defaults_when_only_required_given(tmp_path):
+    p = tmp_path / "minimal.csv"
+    pd.DataFrame({
+        "parameter": ["delta1", "delta2", "tau1", "tau2"],
+        "value": [0.30, 0.18, 0.10, 0.18],
+    }).to_csv(p, index=False)
+    ci = load_climate_inputs(p)
+    assert ci["confidence_level"] == 95.0
+    assert ci["distribution"] == "gumbel"
+    assert ci["pmf"] is None
+    assert ci["return_periods"][0] == 2 and ci["return_periods"][-1] == 100000
+
+
+def test_load_climate_inputs_reads_pmf_when_present(tmp_path):
+    p = tmp_path / "with_pmf.csv"
+    pd.DataFrame({
+        "parameter": ["delta1", "delta2", "tau1", "tau2", "pmf"],
+        "value": [0.30, 0.18, 0.10, 0.18, 4140],
+    }).to_csv(p, index=False)
+    ci = load_climate_inputs(p)
+    assert ci["pmf"] == pytest.approx(4140.0)
+
+
+def test_load_climate_inputs_percent_mistake_raises(tmp_path):
+    # entering 30 instead of 0.30 is the classic mistake -- must be caught
+    p = tmp_path / "percent_mistake.csv"
+    pd.DataFrame({
+        "parameter": ["delta1", "delta2", "tau1", "tau2"],
+        "value": [30, 18, 10, 18],
+    }).to_csv(p, index=False)
+    with pytest.raises(ValueError, match="looks like a percent"):
+        load_climate_inputs(p)
+
+
+def test_load_climate_inputs_missing_required_raises(tmp_path):
+    p = tmp_path / "missing.csv"
+    pd.DataFrame({
+        "parameter": ["delta1", "delta2", "tau1"],  # tau2 missing
+        "value": [0.30, 0.18, 0.10],
+    }).to_csv(p, index=False)
+    with pytest.raises(ValueError, match="tau2"):
+        load_climate_inputs(p)
+
+
+def test_load_climate_inputs_missing_file_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_climate_inputs(tmp_path / "nope.csv")
+
+
+def test_load_climate_inputs_wrong_columns_raises(tmp_path):
+    p = tmp_path / "wrong.csv"
+    pd.DataFrame({"name": ["delta1"], "val": [0.3]}).to_csv(p, index=False)
+    with pytest.raises(ValueError, match="parameter.*value|value.*column"):
+        load_climate_inputs(p)

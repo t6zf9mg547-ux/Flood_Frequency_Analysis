@@ -53,6 +53,9 @@ Thumbs.db
 /Data/Regional/*
 !/Data/Regional/Template/
 !/Data/Regional/Template/*.csv
+!/Data/Climate_Adjustment/
+/Data/Climate_Adjustment/*
+!/Data/Climate_Adjustment/Template.csv
 
 # Generated output -- regenerated locally, not tracked in git
 /Output/*

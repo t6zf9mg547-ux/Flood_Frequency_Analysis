@@ -50,6 +50,32 @@ class RegionPaths:
     plot_dir: Path
 
 
+@dataclass
+class ClimatePaths:
+    """Standard path layout for one climate-informed (CIFAM) adjustment case:
+
+        <project_root>/
+            Data/<CaseName>.csv                       - baseline annual-maximum series
+                                                        (reused from the single-station
+                                                        tool -- NOT duplicated)
+            Data/Climate_Adjustment/<CaseName>.csv    - the four climate inputs
+                                                        (delta1/delta2/tau1/tau2) + options
+            Output/Climate_Adjustment/<CaseName>/     - CSV outputs for this case
+            Plot/Climate_Adjustment/<CaseName>/       - PNG plots for this case
+
+    Mirrors the Regional/ namespace (see RegionPaths / resolve_region). The
+    baseline series lives at the ordinary single-station location so a case
+    already analysed with run_analysis.py needs no data duplication; only the
+    small climate-inputs file is new.
+    """
+    case_name: str
+    project_root: Path
+    baseline_csv: Path       # Data/<CaseName>.csv                    (baseline series)
+    climate_csv: Path        # Data/Climate_Adjustment/<CaseName>.csv (the 4 params)
+    output_dir: Path         # Output/Climate_Adjustment/<CaseName>/
+    plot_dir: Path           # Plot/Climate_Adjustment/<CaseName>/
+
+
 def project_root_from(module_file) -> Path:
     """
     Given __file__ of a script living directly under <project_root>/Module/,
@@ -93,6 +119,120 @@ def resolve_region(region_name: str, module_file) -> RegionPaths:
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_dir.mkdir(parents=True, exist_ok=True)
     return RegionPaths(region_name, root, data_dir, output_dir, plot_dir)
+
+
+def resolve_climate_case(case_name: str, module_file) -> ClimatePaths:
+    """
+    Resolve the standard paths for one climate-informed (CIFAM) adjustment
+    case and create Output/Climate_Adjustment/<CaseName>/ and
+    Plot/Climate_Adjustment/<CaseName>/ if they don't exist yet.
+
+    The baseline series is read from the ordinary single-station location,
+    Data/<CaseName>.csv, so a case already set up for run_analysis.py needs
+    no data duplication; the only new input is the four climate numbers at
+    Data/Climate_Adjustment/<CaseName>.csv (see load_climate_inputs and
+    Data/Climate_Adjustment/Template.csv).
+    """
+    root = project_root_from(module_file)
+    baseline_csv = root / "Data" / f"{case_name}.csv"
+    climate_csv = root / "Data" / "Climate_Adjustment" / f"{case_name}.csv"
+    output_dir = root / "Output" / "Climate_Adjustment" / case_name
+    plot_dir = root / "Plot" / "Climate_Adjustment" / case_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    return ClimatePaths(case_name, root, baseline_csv, climate_csv, output_dir, plot_dir)
+
+
+# Keys expected in a Data/Climate_Adjustment/<CaseName>.csv inputs file.
+_CLIMATE_REQUIRED = ("delta1", "delta2", "tau1", "tau2")
+_CLIMATE_OPTIONAL_DEFAULTS = {
+    "confidence_level": 95.0,
+    "distribution": "gumbel",
+    "return_periods": (2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 100000),
+    "pmf": None,
+}
+
+
+def load_climate_inputs(path) -> dict:
+    """
+    Read the four CIFAM climate numbers (+ options) from a long-format CSV:
+
+        parameter,value,units,description
+        delta1,0.30,fraction,...
+        delta2,0.18,fraction,...
+        tau1,0.10,fraction,...
+        tau2,0.18,fraction,...
+        confidence_level,95,percent,...
+        return_periods,"2,5,...,100000",years,...
+        distribution,gumbel,name,...
+        pmf,,m3/s,...
+
+    Only the 'parameter' and 'value' columns are read; 'units'/'description'
+    are documentation for whoever edits the file and are ignored here. The
+    long "one parameter per row" format (rather than a single wide header
+    row) is used so the description column can travel with each value --
+    consistent with how the descriptor-catalog templates are laid out, and
+    friendlier for a non-developer duplicating Template.csv per scenario.
+
+    delta1/delta2/tau1/tau2 are REQUIRED and are FRACTIONS (0.30 == +30%);
+    a common mistake is entering 30 (meaning percent) -- values with
+    magnitude > 1.5 raise, to catch that early rather than producing absurd
+    floods silently. Returns a dict with keys delta1, delta2, tau1, tau2,
+    confidence_level, distribution, return_periods (tuple), pmf (float|None).
+    """
+    path = str(path)
+    if not Path(path).exists():
+        raise FileNotFoundError(
+            f"Climate inputs file not found: {path}\n"
+            f"Duplicate Data/Climate_Adjustment/Template.csv to "
+            f"Data/Climate_Adjustment/<CaseName>.csv and edit the four "
+            f"delta/tau values."
+        )
+    df = pd.read_csv(path)
+    if "parameter" not in df.columns or "value" not in df.columns:
+        raise ValueError(
+            f"{path} must have 'parameter' and 'value' columns "
+            f"(see Data/Climate_Adjustment/Template.csv)."
+        )
+    raw = {str(k).strip(): v for k, v in zip(df["parameter"], df["value"])}
+
+    out = {}
+    for key in _CLIMATE_REQUIRED:
+        if key not in raw or pd.isna(raw[key]):
+            raise ValueError(f"{path}: required parameter '{key}' is missing or blank.")
+        val = float(raw[key])
+        if abs(val) > 1.5:
+            raise ValueError(
+                f"{path}: '{key}' = {val} looks like a percent, not a fraction. "
+                f"Enter fractions (e.g. 0.30 for +30%), not 30."
+            )
+        out[key] = val
+
+    # optional: confidence_level
+    cl = raw.get("confidence_level", None)
+    out["confidence_level"] = (float(cl) if cl is not None and not pd.isna(cl)
+                               else _CLIMATE_OPTIONAL_DEFAULTS["confidence_level"])
+
+    # optional: distribution
+    dist = raw.get("distribution", None)
+    out["distribution"] = (str(dist).strip() if dist is not None and not pd.isna(dist)
+                           else _CLIMATE_OPTIONAL_DEFAULTS["distribution"])
+
+    # optional: return_periods (comma-separated string, or a single number)
+    rp = raw.get("return_periods", None)
+    if rp is None or (isinstance(rp, float) and pd.isna(rp)):
+        out["return_periods"] = tuple(_CLIMATE_OPTIONAL_DEFAULTS["return_periods"])
+    else:
+        out["return_periods"] = tuple(
+            float(x) for x in str(rp).replace(";", ",").split(",") if str(x).strip()
+        )
+
+    # optional: pmf reference value
+    pmf = raw.get("pmf", None)
+    out["pmf"] = (float(pmf) if pmf is not None and not pd.isna(pmf)
+                  and str(pmf).strip() != "" else None)
+
+    return out
 
 
 def load_region_stations(paths: RegionPaths, value_col=None, year_col=None):

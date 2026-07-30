@@ -3,13 +3,14 @@
 [![Tests](https://github.com/<OWNER>/<REPO>/actions/workflows/tests.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/tests.yml)
 <!-- Replace <OWNER>/<REPO> above with this repo's actual GitHub path once pushed, e.g. jsmith/Flood_Frequency_Analysis -->
 
-A Python tool for flood frequency analysis — and more generally, frequency analysis of any annual-maximum series (rainfall included) — using [uv](https://docs.astral.sh/uv/) for dependency management. It has three main objectives:
+A Python tool for flood frequency analysis — and more generally, frequency analysis of any annual-maximum series (rainfall included) — using [uv](https://docs.astral.sh/uv/) for dependency management. It has four main objectives:
 
 1. **[Single-station analysis](#how-to-run-an-analysis)** — fits 9 candidate distributions (Normal, LogNormal 2p/3p, Gumbel, GEV, Exponential, Gamma, Pearson III, Log-Pearson III) to one station's annual-maximum series via method of moments / maximum likelihood / probability-weighted moments, ranks them by AIC/BIC/KS/Anderson-Darling, and reports a best-fit recommendation (plus an Akaike-weighted multi-model average) with bootstrap confidence intervals.
 2. **[Regional (pooled) analysis](#regional-pooled-flood-frequency-analysis)** — the index-flood method (Dalrymple, 1960; Hosking & Wallis, 1997): pools several hydrologically-similar stations so the *shape* of the flood distribution is estimated from many station-years combined, with full discordancy/heterogeneity/distribution-selection diagnostics, per-station data quality checks, and Monte-Carlo confidence intervals.
 3. **[Automatic pooling-group formation](#forming-a-pooling-group-automatically)** — the "region of influence" approach (Burn, 1990): given a target site and a catalog of candidate stations described by numeric descriptors (catchment area, precipitation, etc. for streamflow; coordinates, elevation, climatology for rainfall), ranks candidates by similarity and proposes which ones to pool, rather than requiring the group to be assembled by hand.
+4. **[Climate-informed adjustment (CIFAM)](#climate-informed-adjustment-cifam)** — the rapid Climate-Informed Flood Assessment Methodology (Grijsen & Lino, ICOLD 2026): adjusts a single-station fit for projected climate change by shifting the distribution's first two moments and widening its confidence intervals to combine sampling uncertainty with climate-change uncertainty, for Gumbel / Log-Normal / Pearson III (closed form) or any distribution (Monte Carlo).
 
-All three work for streamflow, rainfall, or any other generic annual-maximum variable (see [Beyond streamflow](#beyond-streamflow-any-annual-maximum-series)).
+All four work for streamflow, rainfall, or any other generic annual-maximum variable (see [Beyond streamflow](#beyond-streamflow-any-annual-maximum-series)).
 
 ## What's included
 ```
@@ -22,7 +23,9 @@ Flood_Frequency_Analysis/
 │   │   ├── candidate_descriptors_rainfall_TEMPLATE.csv
 │   │   ├── discharge_station_data/     # matching annual-maximum series, one CSV per candidate
 │   │   └── rainfall_station_data/      # matching annual-maximum series, one CSV per candidate
-│   └── Regional/<RegionName>/   # station CSVs for one regional (pooled) analysis group
+│   ├── Regional/<RegionName>/   # station CSVs for one regional (pooled) analysis group
+│   └── Climate_Adjustment/      # climate-informed (CIFAM) inputs, one CSV per case
+│       └── Template.csv          # the four delta/tau climate numbers to duplicate per case (tracked)
 ├── Module/
 │   ├── run_analysis.py           # single-station CLI entry point
 │   ├── run_regional_analysis.py  # regional (pooled) CLI entry point
@@ -30,9 +33,11 @@ Flood_Frequency_Analysis/
 │   ├── floodfreq/                # the package
 │   └── tests/                    # pytest regression suite (200+ tests)
 ├── Output/          # generated CSVs, one subfolder per case: Output/<CaseName>/ (not tracked in git)
-│   └── Regional/<RegionName>/    # regional analysis CSV outputs
+│   ├── Regional/<RegionName>/    # regional analysis CSV outputs
+│   └── Climate_Adjustment/<CaseName>/  # climate-adjustment CSV outputs
 ├── Plot/            # generated PNG plots, one subfolder per case: Plot/<CaseName>/ (not tracked in git)
-│   └── Regional/<RegionName>/    # regional analysis PNG outputs
+│   ├── Regional/<RegionName>/    # regional analysis PNG outputs
+│   └── Climate_Adjustment/<CaseName>/  # climate-adjustment PNG outputs
 ├── pyproject.toml   # project metadata + dependencies (uv-managed)
 └── .gitignore       # excludes venv, cache files, Data/Output/Plot, OS junk, etc.
 ```
@@ -110,6 +115,7 @@ This changes every plot axis, chart title, `summary.txt` header, and Excel/PDF r
 `--pdf-report` bundles the text summary, the dashboard, and every individual full-size plot into one `Output/<CaseName>/<CaseName>_report.pdf` — the single file to actually hand to a colleague, instead of the separate CSVs/PNGs.
 
 ## Regional (pooled) flood frequency analysis
+
 
 For a group of hydrologically-similar stations, you can get a better estimate of the flood distribution's *shape* by pooling them — the classical index-flood method (Dalrymple, 1960), using the L-moment-based regional statistics of Hosking & Wallis (1997) (see also Rao & Hamed, 2000, Ch. 9). Each station keeps its own scale (its "index flood," the station's own mean), while the shape of the growth curve is estimated from all the pooled station-years combined.
 
@@ -245,6 +251,65 @@ uv run python Module/form_pooling_group.py \
 This ranks every other candidate by weighted Euclidean distance to the target in standardized descriptor space (z-scored using the candidate pool's own mean/std, so descriptors on very different scales — e.g. area in km² vs. a 0-1 soil index — contribute comparably), then applies one of two stopping rules: `--n-stations` (take the N most similar) or `--min-years` (accumulate the most similar candidates until their combined record length reaches a target, per Hosking & Wallis's rule-of-thumb of roughly 5× the design return period in station-years). Writes `pooling_ranking_full.csv` and `pooling_group_proposed.csv` to `Output/Regional/<RegionName>/`; with `--apply`, also copies the proposed stations' own CSVs (from `--station-data-dir`) into `Data/Regional/<RegionName>/`, ready for `run_regional_analysis.py`.
 
 **This is a proposal step, not a substitute for discordancy/heterogeneity screening** — always run `run_regional_analysis.py` on the resulting group afterward; a statistically similar-looking descriptor set doesn't guarantee a homogeneous region.
+
+## Climate-informed adjustment (CIFAM)
+
+The `floodfreq.climate_adjustment` module implements the rapid Climate-Informed Flood Assessment Methodology (CIFAM) of Grijsen & Lino (ICOLD 2026): it takes a baseline single-station fit and produces climate-adjusted flood quantiles whose confidence intervals combine the usual sampling uncertainty with a second, independent climate-change uncertainty. The core assumption is that climate change acts on a distribution only through its first two moments (the mean and the inter-annual standard deviation); skewness is either held fixed (Gumbel) or moves only as a consequence of the mean and standard deviation shifting (Log-Normal, Pearson III).
+
+You supply four numbers — projected changes in **flow space**, as decimals — that the tool does *not* derive for you (the same boundary as pooling-group formation not doing your GIS work): `δ1` = projected fractional increase in the mean of annual-maximum flows, `δ2` = its standard deviation across the climate-model ensemble, and `τ1`/`τ2` = the same pair for the inter-annual standard deviation. (If your projections are in precipitation space, translate them to flow space with a precipitation elasticity first; e.g. in the paper's Lom Pangar case a 20% ± 12% mean-precipitation change times an elasticity of 1.5 gives δ1 = 30%, δ2 = 18%.)
+
+### Setting up a climate-adjustment case
+
+The four climate numbers live in their own file, alongside the reused baseline series:
+
+```
+Data/<CaseName>.csv                    # baseline annual-maximum series (the SAME file the
+                                       #   single-station tool uses -- not duplicated)
+Data/Climate_Adjustment/<CaseName>.csv # the four climate numbers (+ options) for this case
+Output/Climate_Adjustment/<CaseName>/  # CSV outputs
+Plot/Climate_Adjustment/<CaseName>/    # PNG plots (later)
+```
+
+This mirrors the `Regional/` namespace. To set up a case, **duplicate `Data/Climate_Adjustment/Template.csv`** to `Data/Climate_Adjustment/<CaseName>.csv` (using the same `<CaseName>` as your existing `Data/<CaseName>.csv` baseline series) and edit the values. The template is a self-documenting long-format table:
+
+```
+parameter,value,units,description
+delta1,0.30,fraction,Projected increase in the MEAN of annual-maximum flows (flow-space; 0.30 = +30%)
+delta2,0.18,fraction,Ensemble standard deviation of delta1
+tau1,0.10,fraction,Projected increase in the inter-annual STANDARD DEVIATION of annual-maximum flows
+tau2,0.18,fraction,Ensemble standard deviation of tau1
+confidence_level,95,percent,Two-sided confidence level for the combined interval
+return_periods,"2,5,10,...,100000",years,Return periods to evaluate (comma-separated)
+distribution,gumbel,name,Closed-form: gumbel | lognormal2 | pearson3
+pmf,,m3/s,Optional PMF reference value (leave blank if none)
+```
+
+Only `delta1/delta2/tau1/tau2` are required; the rest fall back to sensible defaults. **Values are fractions, not percents** (enter `0.30`, not `30` — the loader rejects magnitudes above 1.5 to catch that mistake). The shipped `Template.csv` is pre-filled with the paper's Lom Pangar numbers as a worked example.
+
+### Running the adjustment (library API)
+
+```python
+from floodfreq.io_utils import resolve_climate_case, load_climate_inputs, read_series
+from floodfreq.climate_adjustment import (
+    climate_adjusted_quantiles,      # closed form: Gumbel, Log-Normal (2p), Pearson III
+    mc_climate_adjusted_quantiles,   # Monte Carlo: distribution-agnostic
+)
+
+paths = resolve_climate_case("MyCase", __file__)   # from a script in Module/
+_, Q = read_series(paths.baseline_csv)             # baseline series, Data/MyCase.csv
+ci = load_climate_inputs(paths.climate_csv)        # the four numbers + options
+
+result = climate_adjusted_quantiles(
+    Q, ci["distribution"], ci["return_periods"],
+    ci["delta1"], ci["delta2"], ci["tau1"], ci["tau2"],
+    confidence_level=ci["confidence_level"],
+)
+result.to_frame()   # T, baseline point + CI, climate point + combined CI
+```
+
+The closed form covers the three distributions the paper gives formulas for; the Monte Carlo path (`mc_climate_adjusted_quantiles`, same signature plus `n_sim`) works for any of them and is the route that will later extend to the tool's other candidate distributions. Note that the Log-Normal closed form uses an exact delta-method variance derived for this implementation rather than the paper's published Log-Normal variance term, which overestimates the true (Monte-Carlo) variance by ~45% at realistic coefficients of variation; see the module docstring and CHANGELOG [0.6.0] for details and for the Lom Pangar validation.
+
+There is no `run_analysis.py` CLI flag, automatic CSV/PNG writing, or Figure-4-style plot yet — the folder contract above is defined (`resolve_climate_case`) and the inputs template is in place, but wiring a CLI that writes `Output/Climate_Adjustment/<CaseName>/` and plots is a later release.
 
 ## Per-case settings file (optional)
 
