@@ -176,8 +176,8 @@ def test_resolve_climate_case_builds_expected_paths_and_creates_output_dirs(tmp_
     assert paths.baseline_csv == tmp_path / "Data" / "LomPangar.csv"
     # the four climate numbers live under the Climate_Adjustment namespace
     assert paths.climate_csv == tmp_path / "Data" / "Climate_Adjustment" / "LomPangar.csv"
-    assert paths.output_dir == tmp_path / "Output" / "Climate_Adjustment" / "LomPangar"
-    assert paths.plot_dir == tmp_path / "Plot" / "Climate_Adjustment" / "LomPangar"
+    assert paths.output_dir == tmp_path / "Output" / "LomPangar" / "Climate_Adjustment"
+    assert paths.plot_dir == tmp_path / "Plot" / "LomPangar" / "Climate_Adjustment"
     # output/plot dirs created eagerly (mirrors resolve_case / resolve_region)
     assert paths.output_dir.is_dir()
     assert paths.plot_dir.is_dir()

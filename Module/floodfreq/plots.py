@@ -862,3 +862,83 @@ def save_regional_dashboard(result, path, dpi=150):
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def climate_adjustment_plot(result, ax=None, pmf=None, variable_name="Flood magnitude",
+                            units=None, short_name="Flood", reduced_variate_axis=True):
+    """
+    Figure-4-style plot for a CIFAM climate adjustment (Grijsen & Lino 2026).
+
+    Shows, versus return period:
+      - the baseline central quantile and its (sampling-only) confidence band,
+      - the climate-adjusted central quantile and its combined (sampling +
+        climate) confidence band,
+    plus an optional horizontal PMF reference line. `result` is a
+    ClimateQuantileResult (see floodfreq.climate_adjustment).
+
+    reduced_variate_axis: if True, the x-axis is the Gumbel reduced variate
+    t_p = -ln(-ln(1 - 1/T)) (as in the paper's Fig. 4), with T annotated at
+    the standard return periods; if False, a log-scale return-period axis is
+    used instead.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 6))
+    else:
+        fig = ax.figure
+
+    T = np.asarray(result.T, dtype=float)
+    if reduced_variate_axis:
+        x = -np.log(-np.log(1.0 - 1.0 / T))
+        x_label = "Reduced Gumbel variate  −ln(−ln(1 − 1/T))"
+    else:
+        x = T
+        x_label = "Return period T (years)"
+
+    # baseline: black central line + grey band
+    ax.plot(x, result.baseline_point, color="black", lw=1.8, label="Baseline (central)")
+    ax.fill_between(x, result.baseline_lower, result.baseline_upper,
+                    color="0.6", alpha=0.30,
+                    label=f"Baseline {result.confidence_level:g}% CI (sampling only)")
+
+    # climate: red central line + red band
+    ax.plot(x, result.climate_point, color="crimson", lw=2.0, label="Climate-adjusted (central)")
+    ax.fill_between(x, result.climate_lower, result.climate_upper,
+                    color="crimson", alpha=0.18,
+                    label=f"Climate-adjusted {result.confidence_level:g}% CI (sampling + climate)")
+    # dashed edges on the combined band, echoing the paper's dotted CI lines
+    ax.plot(x, result.climate_lower, color="crimson", lw=1.0, ls="--", alpha=0.8)
+    ax.plot(x, result.climate_upper, color="crimson", lw=1.0, ls="--", alpha=0.8)
+
+    if pmf is not None:
+        ax.axhline(pmf, color="goldenrod", lw=2.0, label=f"PMF = {pmf:g}")
+
+    if not reduced_variate_axis:
+        ax.set_xscale("log")
+    else:
+        # annotate a few standard return periods along the top
+        for T_mark in (10, 100, 1000, 10000, 100000):
+            if T.min() <= T_mark <= T.max():
+                xm = -np.log(-np.log(1.0 - 1.0 / T_mark))
+                ax.axvline(xm, color="steelblue", lw=0.8, ls=":", alpha=0.6)
+                ax.text(xm, ax.get_ylim()[1], f"{T_mark:,} yr", rotation=90,
+                        va="top", ha="right", fontsize=7, color="steelblue")
+
+    y_label = variable_name + (f" ({units})" if units else "")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(f"{short_name} frequency curve with climate adjustment "
+                 f"({DISTRIBUTIONS[result.distribution]['label']})")
+    ax.grid(True, which="both", ls=":", alpha=0.4)
+    ax.legend(fontsize=8, loc="upper left")
+    return fig
+
+
+def save_climate_adjustment_plot(result, path, pmf=None, variable_name="Flood magnitude",
+                                 units=None, short_name="Flood",
+                                 reduced_variate_axis=True, dpi=150):
+    fig = climate_adjustment_plot(result, pmf=pmf, variable_name=variable_name,
+                                  units=units, short_name=short_name,
+                                  reduced_variate_axis=reduced_variate_axis)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return path

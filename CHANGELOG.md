@@ -2,6 +2,23 @@
 
 All notable changes to the Flood Frequency Analysis tool are documented here.
 
+## [0.7.0] - 2026-07-30
+
+### Added — CIFAM command-line entry point (`run_climate_adjustment.py`) + Figure-4-style plot
+- New `Module/run_climate_adjustment.py`, so the climate adjustment is run the same way as the other tools rather than only as a library call: `uv run python Module/run_climate_adjustment.py <CaseName>`. It reads the baseline series from `Data/<CaseName>.csv` and the four climate numbers from `Data/Climate_Adjustment/<CaseName>.csv`, and writes three outputs:
+  - `Output/<CaseName>/Climate_Adjustment/climate_adjustment_table.csv` — per return period, baseline point + CI (sampling only) and climate point + combined CI.
+  - `Output/<CaseName>/Climate_Adjustment/summary.txt` — a provenance-stamped summary (matching `run_analysis.py`'s header style) with the inputs and the full table, plus a PMF comparison line when a PMF is given.
+  - `Plot/<CaseName>/Climate_Adjustment/climate_adjustment.png` — a Figure-4-style plot.
+- **Output layout changed to case-first** from the `Output/Climate_Adjustment/<CaseName>/` scheme introduced in v0.6.0 (which never shipped a CLI to populate it, so nothing downstream depended on it). Climate outputs now nest under the same `Output/<CaseName>/` and `Plot/<CaseName>/` that `run_analysis.py` already creates, so a case's baseline results and its climate adjustment live together. The inputs stay analysis-type-first at `Data/Climate_Adjustment/<CaseName>.csv`, so the shipped `Template.csv` and its single `.gitignore` exception are unchanged. (Regional analysis remains analysis-type-first on purpose — a region isn't a single case, whereas a climate adjustment is an extension of one.)
+- Mirrors `run_analysis.py`'s conventions: an interactive case picker when no name is given, `--value-col`/`--year-col`/`--variable-name`/`--units`/`--short-name`, and a provenance header. Adds CIFAM-specific flags that override the inputs file for one-off scenarios: `--delta1/--delta2/--tau1/--tau2`, `--distribution`, `--confidence-level`, `--pmf`, `--return-periods`, `--method {closed-form,monte-carlo}`, `--n-sim`, `--random-state`, `--no-plot`, and `--return-period-axis`.
+- New `plots.climate_adjustment_plot()` / `save_climate_adjustment_plot()`: baseline (black central line + grey sampling-only band) vs climate-adjusted (red central line + wider red combined band, dashed edges) on the Gumbel reduced-variate axis with return-period markers, and an optional PMF reference line — the Fig. 4 layout from Grijsen & Lino (2026).
+
+### Fixed — value/year column unpacking in the CIFAM data path
+- `io_utils.read_series()` returns `(values, years)` in that order; the initial CIFAM code (the README example, the end-to-end test, and the new run script) unpacked it as `years, values`, which silently fed the year labels in as the "flood series" and produced year-valued quantiles (~2000 m³/s) with an absurdly small standard deviation. Corrected everywhere. The bug had hidden in the end-to-end test because it compared two calls that both used the same mis-unpacked variable; the test now asserts the baseline mean lands in the flood-series range (not the ~1970 year range) and that the flood series, not the years, drives the quantiles, so a future swap fails loudly.
+
+### Tests
+- New `Module/tests/test_run_climate_adjustment.py` (5 tests): the `--flag`-overrides-file precedence helper (including the 0.0-is-not-falsy case), and two in-process end-to-end runs that exercise the whole CLI pipeline (CSV + summary.txt + plot written, sane values, combined CI wider than baseline CI, `--delta1` override and `--no-plot` honoured).
+
 ## [0.6.0] - 2026-07-29
 
 ### Added — CIFAM: climate-informed flood frequency adjustment (single-station), items 1 & 2

@@ -357,7 +357,14 @@ def test_end_to_end_from_climate_inputs_file(tmp_path):
     }).to_csv(tmp_path / "Data" / "Climate_Adjustment" / "DemoCase.csv", index=False)
 
     paths = resolve_climate_case("DemoCase", module_file)
-    _, Q = read_series(paths.baseline_csv)
+    Q, years = read_series(paths.baseline_csv)
+    # read_series returns (values, years) in THAT order -- guard against a
+    # swap: the flood series must be the ~900-scale gumbel draws, not the
+    # 1970s year labels. (A value/year unpacking swap silently produces
+    # year-valued "floods" and absurd quantiles.)
+    assert 300 < float(np.mean(Q)) < 3000, "read_series returned years, not the flood series"
+    assert years is not None and int(years[0]) == 1970
+
     ci = load_climate_inputs(paths.climate_csv)
     r = climate_adjusted_quantiles(
         Q, ci["distribution"], ci["return_periods"],

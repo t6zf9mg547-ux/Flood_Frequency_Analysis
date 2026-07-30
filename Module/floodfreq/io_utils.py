@@ -60,20 +60,24 @@ class ClimatePaths:
                                                         tool -- NOT duplicated)
             Data/Climate_Adjustment/<CaseName>.csv    - the four climate inputs
                                                         (delta1/delta2/tau1/tau2) + options
-            Output/Climate_Adjustment/<CaseName>/     - CSV outputs for this case
-            Plot/Climate_Adjustment/<CaseName>/       - PNG plots for this case
+            Output/<CaseName>/Climate_Adjustment/     - CSV outputs for this case
+            Plot/<CaseName>/Climate_Adjustment/       - PNG plots for this case
 
-    Mirrors the Regional/ namespace (see RegionPaths / resolve_region). The
-    baseline series lives at the ordinary single-station location so a case
-    already analysed with run_analysis.py needs no data duplication; only the
-    small climate-inputs file is new.
+    Outputs are CASE-FIRST (nested under the same Output/<CaseName>/ and
+    Plot/<CaseName>/ that run_analysis.py creates), so a case's baseline
+    results and its climate adjustment sit together. The input stays
+    analysis-type-first (Data/Climate_Adjustment/) so its shipped template and
+    gitignore exception are unaffected. See resolve_climate_case for why this
+    asymmetry is deliberate. The baseline series lives at the ordinary
+    single-station location so a case already analysed with run_analysis.py
+    needs no data duplication; only the small climate-inputs file is new.
     """
     case_name: str
     project_root: Path
     baseline_csv: Path       # Data/<CaseName>.csv                    (baseline series)
     climate_csv: Path        # Data/Climate_Adjustment/<CaseName>.csv (the 4 params)
-    output_dir: Path         # Output/Climate_Adjustment/<CaseName>/
-    plot_dir: Path           # Plot/Climate_Adjustment/<CaseName>/
+    output_dir: Path         # Output/<CaseName>/Climate_Adjustment/
+    plot_dir: Path           # Plot/<CaseName>/Climate_Adjustment/
 
 
 def project_root_from(module_file) -> Path:
@@ -124,20 +128,30 @@ def resolve_region(region_name: str, module_file) -> RegionPaths:
 def resolve_climate_case(case_name: str, module_file) -> ClimatePaths:
     """
     Resolve the standard paths for one climate-informed (CIFAM) adjustment
-    case and create Output/Climate_Adjustment/<CaseName>/ and
-    Plot/Climate_Adjustment/<CaseName>/ if they don't exist yet.
+    case and create Output/<CaseName>/Climate_Adjustment/ and
+    Plot/<CaseName>/Climate_Adjustment/ if they don't exist yet.
+
+    Outputs are CASE-FIRST -- nested under the same Output/<CaseName>/ and
+    Plot/<CaseName>/ that run_analysis.py already creates for the baseline
+    single-station analysis -- so everything for one case (baseline results
+    plus its climate adjustment) lives together under one <CaseName> folder.
+    This differs from Regional analysis (Output/Regional/<RegionName>/,
+    analysis-type-first) on purpose: CIFAM is an extension of a single case
+    and reuses that case's Data/<CaseName>.csv, whereas a region is its own
+    top-level unit.
 
     The baseline series is read from the ordinary single-station location,
     Data/<CaseName>.csv, so a case already set up for run_analysis.py needs
-    no data duplication; the only new input is the four climate numbers at
-    Data/Climate_Adjustment/<CaseName>.csv (see load_climate_inputs and
-    Data/Climate_Adjustment/Template.csv).
+    no data duplication. The only new input is the four climate numbers at
+    Data/Climate_Adjustment/<CaseName>.csv -- kept analysis-type-first so its
+    shipped Template.csv and its single .gitignore exception stay put (see
+    load_climate_inputs and Data/Climate_Adjustment/Template.csv).
     """
     root = project_root_from(module_file)
     baseline_csv = root / "Data" / f"{case_name}.csv"
     climate_csv = root / "Data" / "Climate_Adjustment" / f"{case_name}.csv"
-    output_dir = root / "Output" / "Climate_Adjustment" / case_name
-    plot_dir = root / "Plot" / "Climate_Adjustment" / case_name
+    output_dir = root / "Output" / case_name / "Climate_Adjustment"
+    plot_dir = root / "Plot" / case_name / "Climate_Adjustment"
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_dir.mkdir(parents=True, exist_ok=True)
     return ClimatePaths(case_name, root, baseline_csv, climate_csv, output_dir, plot_dir)

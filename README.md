@@ -30,14 +30,15 @@ Flood_Frequency_Analysis/
 │   ├── run_analysis.py           # single-station CLI entry point
 │   ├── run_regional_analysis.py  # regional (pooled) CLI entry point
 │   ├── form_pooling_group.py     # propose a pooling group from a candidate descriptor catalog
+│   ├── run_climate_adjustment.py # climate-informed (CIFAM) adjustment CLI entry point
 │   ├── floodfreq/                # the package
 │   └── tests/                    # pytest regression suite (200+ tests)
 ├── Output/          # generated CSVs, one subfolder per case: Output/<CaseName>/ (not tracked in git)
-│   ├── Regional/<RegionName>/    # regional analysis CSV outputs
-│   └── Climate_Adjustment/<CaseName>/  # climate-adjustment CSV outputs
+│   ├── <CaseName>/Climate_Adjustment/   # climate-adjustment CSV outputs (nested under the case)
+│   └── Regional/<RegionName>/    # regional analysis CSV outputs
 ├── Plot/            # generated PNG plots, one subfolder per case: Plot/<CaseName>/ (not tracked in git)
-│   ├── Regional/<RegionName>/    # regional analysis PNG outputs
-│   └── Climate_Adjustment/<CaseName>/  # climate-adjustment PNG outputs
+│   ├── <CaseName>/Climate_Adjustment/   # climate-adjustment PNG outputs (nested under the case)
+│   └── Regional/<RegionName>/    # regional analysis PNG outputs
 ├── pyproject.toml   # project metadata + dependencies (uv-managed)
 └── .gitignore       # excludes venv, cache files, Data/Output/Plot, OS junk, etc.
 ```
@@ -266,11 +267,14 @@ The four climate numbers live in their own file, alongside the reused baseline s
 Data/<CaseName>.csv                    # baseline annual-maximum series (the SAME file the
                                        #   single-station tool uses -- not duplicated)
 Data/Climate_Adjustment/<CaseName>.csv # the four climate numbers (+ options) for this case
-Output/Climate_Adjustment/<CaseName>/  # CSV outputs
-Plot/Climate_Adjustment/<CaseName>/    # PNG plots (later)
+Output/<CaseName>/Climate_Adjustment/  # CSV outputs (nested under the case, next to the
+                                       #   baseline analysis run_analysis.py writes there)
+Plot/<CaseName>/Climate_Adjustment/    # PNG plot
 ```
 
-This mirrors the `Regional/` namespace. To set up a case, **duplicate `Data/Climate_Adjustment/Template.csv`** to `Data/Climate_Adjustment/<CaseName>.csv` (using the same `<CaseName>` as your existing `Data/<CaseName>.csv` baseline series) and edit the values. The template is a self-documenting long-format table:
+The inputs stay analysis-type-first (`Data/Climate_Adjustment/`), but the outputs are **case-first** — nested under the same `Output/<CaseName>/` and `Plot/<CaseName>/` that `run_analysis.py` uses for the baseline analysis — so a case's baseline results and its climate adjustment sit together in one place. (Regional analysis is the other way round, `Output/Regional/<RegionName>/`, because a region isn't a single case; a climate adjustment is an extension of one.)
+
+The inputs use their own `Data/Climate_Adjustment/` folder (the outputs nest under `Output/<CaseName>/` and `Plot/<CaseName>/`, as shown above). To set up a case, **duplicate `Data/Climate_Adjustment/Template.csv`** to `Data/Climate_Adjustment/<CaseName>.csv` (using the same `<CaseName>` as your existing `Data/<CaseName>.csv` baseline series) and edit the values. The template is a self-documenting long-format table:
 
 ```
 parameter,value,units,description
@@ -286,7 +290,37 @@ pmf,,m3/s,Optional PMF reference value (leave blank if none)
 
 Only `delta1/delta2/tau1/tau2` are required; the rest fall back to sensible defaults. **Values are fractions, not percents** (enter `0.30`, not `30` — the loader rejects magnitudes above 1.5 to catch that mistake). The shipped `Template.csv` is pre-filled with the paper's Lom Pangar numbers as a worked example.
 
-### Running the adjustment (library API)
+### Running the adjustment
+
+Run it like the other tools, passing the case name (the picker lists `Data/Climate_Adjustment/*.csv` if you omit it):
+
+```bash
+uv run python Module/run_climate_adjustment.py MyCase
+```
+
+This reads `Data/MyCase.csv` (baseline series) and `Data/Climate_Adjustment/MyCase.csv` (the four climate numbers), then writes:
+
+- `Output/MyCase/Climate_Adjustment/climate_adjustment_table.csv` — per return period: baseline point + CI (sampling only) and climate point + combined CI,
+- `Output/MyCase/Climate_Adjustment/summary.txt` — a provenance-stamped summary with the inputs and the table,
+- `Plot/MyCase/Climate_Adjustment/climate_adjustment.png` — a Figure-4-style plot (baseline vs climate central lines with both confidence bands, on the Gumbel reduced-variate axis, with an optional PMF line).
+
+Common options (all override the values in the inputs file, so a one-off scenario needs no CSV edit):
+
+```bash
+uv run python Module/run_climate_adjustment.py MyCase --distribution lognormal2
+uv run python Module/run_climate_adjustment.py MyCase --method monte-carlo --n-sim 50000
+uv run python Module/run_climate_adjustment.py MyCase --confidence-level 90 --no-plot
+uv run python Module/run_climate_adjustment.py MyCase --delta1 0.30 --delta2 0.18 --tau1 0.10 --tau2 0.18
+uv run python Module/run_climate_adjustment.py MyCase --variable-name "Peak inflow" --units m3/s --short-name Inflow
+```
+
+`--method closed-form` (default) covers Gumbel, Log-Normal (2p) and Pearson III; any other distribution requires `--method monte-carlo`. The Monte Carlo path is also the route that will later extend to the tool's remaining candidate distributions.
+
+Note that the Log-Normal closed form uses an exact delta-method variance derived for this implementation rather than the paper's published Log-Normal variance term, which overestimates the true (Monte-Carlo) variance by ~45% at realistic coefficients of variation; see the module docstring and CHANGELOG [0.6.0] for details and for the Lom Pangar validation.
+
+### Calling it from Python
+
+The same computation is available as a library call if you'd rather script it:
 
 ```python
 from floodfreq.io_utils import resolve_climate_case, load_climate_inputs, read_series
@@ -296,7 +330,7 @@ from floodfreq.climate_adjustment import (
 )
 
 paths = resolve_climate_case("MyCase", __file__)   # from a script in Module/
-_, Q = read_series(paths.baseline_csv)             # baseline series, Data/MyCase.csv
+Q, _ = read_series(paths.baseline_csv)             # NB: read_series returns (values, years)
 ci = load_climate_inputs(paths.climate_csv)        # the four numbers + options
 
 result = climate_adjusted_quantiles(
@@ -307,9 +341,7 @@ result = climate_adjusted_quantiles(
 result.to_frame()   # T, baseline point + CI, climate point + combined CI
 ```
 
-The closed form covers the three distributions the paper gives formulas for; the Monte Carlo path (`mc_climate_adjusted_quantiles`, same signature plus `n_sim`) works for any of them and is the route that will later extend to the tool's other candidate distributions. Note that the Log-Normal closed form uses an exact delta-method variance derived for this implementation rather than the paper's published Log-Normal variance term, which overestimates the true (Monte-Carlo) variance by ~45% at realistic coefficients of variation; see the module docstring and CHANGELOG [0.6.0] for details and for the Lom Pangar validation.
-
-There is no `run_analysis.py` CLI flag, automatic CSV/PNG writing, or Figure-4-style plot yet — the folder contract above is defined (`resolve_climate_case`) and the inputs template is in place, but wiring a CLI that writes `Output/Climate_Adjustment/<CaseName>/` and plots is a later release.
+Extending the Monte Carlo path to the tool's other candidate distributions is the remaining planned work for this feature.
 
 ## Per-case settings file (optional)
 
