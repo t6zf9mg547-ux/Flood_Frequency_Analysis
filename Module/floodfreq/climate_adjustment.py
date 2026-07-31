@@ -92,6 +92,17 @@ GUMBEL_SIGMA_OVER_BETA = np.pi / np.sqrt(6.0)  # 1.2825498... ; paper writes 1.2
 # Distributions with a closed-form CIFAM implementation (paper Table 1 + eqs 5-8).
 CLOSED_FORM_DISTRIBUTIONS = ("gumbel", "lognormal2", "pearson3")
 
+# Distributions the distribution-agnostic Monte Carlo path can adjust. The
+# three closed-form families plus additional ones reachable through the
+# method-of-moments parameter mapping in mc_climate_adjusted_quantiles. For the
+# 3-parameter skewed families (gev, logpearson3) the shape/skew is held fixed
+# at its baseline value and only location/scale move (CIFAM: climate acts on
+# the first two moments).
+MC_SUPPORTED_DISTRIBUTIONS = (
+    "gumbel", "lognormal2", "pearson3",
+    "normal", "gamma2", "exponential", "gev", "logpearson3",
+)
+
 
 def reduced_variate(T, kind: str = "gumbel") -> np.ndarray:
     """Reduced variate t_p for return period T, per distribution family.
@@ -446,7 +457,7 @@ def mc_climate_adjusted_quantiles(
     tau1: float,
     tau2: float,
     confidence_level: float = 95.0,
-    n_sim: int = 20000,
+    n_sim: int = 30000,
     random_state=None,
     fit_method: str = "mom",
 ) -> ClimateQuantileResult:
@@ -483,26 +494,56 @@ def mc_climate_adjusted_quantiles(
     z = _z_for_confidence(confidence_level)
     alpha = 1.0 - confidence_level / 100.0
 
-    # Baseline skew (descriptive only; see the Pearson III note below).
+    # Baseline skew (descriptive; also the fixed log-space skew for logpearson3).
     base_skew = float(ordinary_moments(np.asarray(data, dtype=float))["CS"])
 
-    def moments_to_params(mu, sigma, skew):
-        """Map target (mu, sigma, skew) to a FitResult via method of moments,
-        reusing distributions.py so the MC path stays consistent with the
-        native parameter conventions used everywhere else.
+    # For 3-parameter skewed distributions (GEV, Log-Pearson III) the CIFAM
+    # assumption "climate acts on the first two moments" is realized by holding
+    # the SHAPE parameter fixed at its baseline-fitted value and rescaling only
+    # location/scale to hit each shifted (mu, sigma). Fit those shapes once here.
+    _data = np.asarray(data, dtype=float)
+    base_gev_shape = None
+    base_lp3_logskew = None
+    if distribution == "gev":
+        # scipy genextreme shape c, fitted once (PWM is robust for GEV).
+        base_gev_shape = float(fit_distribution("gev", _data, method="pwm").params[0])
+    elif distribution == "logpearson3":
+        # skew of log10(x), fitted once and held fixed.
+        _mom = ordinary_moments(np.log10(_data))
+        base_lp3_logskew = float(_mom["CS"])
 
-        Pearson III note: the paper's closed form is the 2-parameter GAMMA
-        (Pearson III with a zero lower bound), whose skew is not free but tied
-        to the first two moments by skew = 2/sqrt(gamma) = 2*sigma/mu. So the
-        MC path derives the skew from (mu, sigma) each realization rather than
-        holding a fixed sample skew; this keeps the cross-check faithful to the
-        closed form. A free-skew (3-parameter) variant -- holding the sample
-        skew fixed while shifting the first two moments -- is a deliberate
-        later generalization, not what the paper's Table 1 derives."""
+    def moments_to_params(mu, sigma, skew):
+        """Map a target (mu, sigma) to a FitResult, holding any third (shape/
+        skew) parameter fixed at its baseline value -- the CIFAM assumption
+        that climate change acts through the first two moments only.
+
+        - pearson3: the paper's closed form is the 2-parameter GAMMA (skew tied
+          to the moments by skew = 2*sigma/mu), so the skew is derived from
+          (mu, sigma) each realization to stay faithful to that closed form.
+        - gev / logpearson3: the shape parameter is held FIXED at its
+          baseline-fitted value (base_gev_shape / base_lp3_logskew) and only
+          location/scale are moved to hit (mu, sigma).
+        - 2-parameter families: (mu, sigma) determine both parameters directly.
+        """
         spec = DISTRIBUTIONS[distribution]
         transform = spec["transform"]
+
+        if distribution == "gev":
+            # genextreme(c, loc, scale). With shape c fixed, the standardized
+            # mean m(c) and std s(c) of genextreme(c, 0, 1) are constants, so
+            #   scale = sigma / s(c),  loc = mu - scale * m(c).
+            from scipy.stats import genextreme
+            c = base_gev_shape
+            m, v = genextreme.stats(c, moments="mv")
+            s = float(np.sqrt(v))
+            scale = sigma / s
+            loc = mu - scale * float(m)
+            params = (c, loc, scale)
+            from .distributions import FitResult
+            return FitResult(distribution, "mom", params, N, transform=None)
+
         if transform is None:
-            if distribution in ("pearson3", "logpearson3"):
+            if distribution == "pearson3":
                 gamma_implied = (mu / sigma) ** 2
                 skew = 2.0 / np.sqrt(gamma_implied)   # = 2*sigma/mu
                 params = (skew, mu, sigma)
@@ -522,13 +563,19 @@ def mc_climate_adjusted_quantiles(
                 )
         else:
             # Log-space distributions: interpret (mu, sigma) as PHYSICAL
-            # moments, convert to log-space moment-of-moments parameters.
+            # moments and convert to log-space moments of y = transform(x).
             cv2 = (sigma / mu) ** 2
             sigy = np.sqrt(np.log(1.0 + cv2))
             muy = np.log(mu) - 0.5 * sigy ** 2
             if transform == "log10":
                 muy, sigy = muy / np.log(10), sigy / np.log(10)
-            params = (muy, sigy)
+            if distribution == "logpearson3":
+                # Pearson III on y = log10(x), with the log-space SKEW held
+                # fixed at its baseline value: pearson3(skew, loc=muy, scale=sigy).
+                params = (base_lp3_logskew, muy, sigy)
+            else:
+                # 2-parameter log-normal family: (muy, sigy).
+                params = (muy, sigy)
         from .distributions import FitResult
         return FitResult(distribution, "mom", params, N, transform=transform)
 

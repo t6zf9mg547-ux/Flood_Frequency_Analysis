@@ -21,6 +21,11 @@ PROJECT_ROOT = MODULE_DIR.parent
 SCRIPT = MODULE_DIR / "form_pooling_group.py"
 TEST_REGION = "_pytest_pooling_test_region"
 
+# The pooling-group descriptor catalogs and their station-data folders are
+# shipped under Data/Templates/Regional/ (grouped with the other regional
+# template files). If you relocate them, update this one constant.
+TEMPLATES_DIR = PROJECT_ROOT / "Data" / "Templates" / "Regional"
+
 
 @pytest.fixture
 def candidate_pool(tmp_path):
@@ -210,7 +215,7 @@ def test_apply_warns_about_missing_station_csvs(candidate_pool, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Bundled templates: Data/Templates/candidate_descriptors_{discharge,rainfall}_TEMPLATE.csv
+# Bundled templates: Data/Templates/Regional/candidate_descriptors_{discharge,rainfall}_TEMPLATE.csv
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("template_name,descriptors,target", [
     ("candidate_descriptors_discharge_TEMPLATE.csv",
@@ -224,7 +229,7 @@ def test_bundled_template_catalog_works_out_of_the_box(template_name, descriptor
     """The two example catalogs shipped in Data/Templates/ should be
     directly usable with form_pooling_group.py, no editing required --
     this is what someone reads the README and tries first."""
-    template_path = PROJECT_ROOT / "Data" / "Templates" / template_name
+    template_path = TEMPLATES_DIR / template_name
     assert template_path.exists(), f"Expected bundled template at {template_path}"
 
     result = _run_cli([
@@ -255,9 +260,9 @@ def test_bundled_templates_are_not_visible_to_single_station_picker():
     top_level_csvs = {p.name for p in data_dir.glob("*.csv")}
     assert "candidate_descriptors_discharge_TEMPLATE.csv" not in top_level_csvs
     assert "candidate_descriptors_rainfall_TEMPLATE.csv" not in top_level_csvs
-    # and they should still exist, just one level down
-    assert (data_dir / "Templates" / "candidate_descriptors_discharge_TEMPLATE.csv").exists()
-    assert (data_dir / "Templates" / "candidate_descriptors_rainfall_TEMPLATE.csv").exists()
+    # and they should still exist, just under Data/Templates/Regional/
+    assert (TEMPLATES_DIR / "candidate_descriptors_discharge_TEMPLATE.csv").exists()
+    assert (TEMPLATES_DIR / "candidate_descriptors_rainfall_TEMPLATE.csv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +283,7 @@ def test_bundled_station_data_matches_catalog_and_is_fully_runnable(
     ONLY bundled content (no user-supplied files needed at all), and the
     resulting Data/Regional/<TEST_REGION>/ should be directly runnable by
     run_regional_analysis.py end to end."""
-    templates_dir = PROJECT_ROOT / "Data" / "Templates"
+    templates_dir = TEMPLATES_DIR
     catalog_path = templates_dir / catalog_name
     station_dir = templates_dir / station_dir_name
     assert station_dir.is_dir(), f"Expected bundled station data at {station_dir}"

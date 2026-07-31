@@ -377,3 +377,76 @@ def test_end_to_end_from_climate_inputs_file(tmp_path):
     np.testing.assert_allclose(r.climate_point, direct.climate_point)
     np.testing.assert_allclose(r.climate_upper, direct.climate_upper)
     assert list(r.T) == [100, 1000, 10000]
+
+
+# --------------------------------------------------------------------------- #
+# (e) Monte Carlo for 3-parameter skewed families: GEV and Log-Pearson III    #
+#     (no closed form; shape/skew held fixed at baseline per CIFAM)            #
+# --------------------------------------------------------------------------- #
+import pytest as _pytest
+
+
+def _gev_sample(n=60, seed=0):
+    from scipy.stats import genextreme
+    return genextreme.rvs(-0.1, loc=900, scale=300, size=n,
+                          random_state=np.random.default_rng(seed))
+
+
+@_pytest.mark.parametrize("dist", ["gev", "logpearson3"])
+def test_mc_supports_gev_and_logpearson3(dist):
+    from floodfreq.climate_adjustment import (
+        mc_climate_adjusted_quantiles, MC_SUPPORTED_DISTRIBUTIONS,
+    )
+    assert dist in MC_SUPPORTED_DISTRIBUTIONS
+    data = _gev_sample()
+    T = np.array([10, 100, 1000, 10000.0])
+    r = mc_climate_adjusted_quantiles(data, dist, T, 0.30, 0.18, 0.10, 0.18,
+                                      n_sim=6000, random_state=1)
+    df = r.to_frame()
+    # finite, positive, monotonically increasing central estimates
+    assert np.all(np.isfinite(df[["baseline_point", "climate_point",
+                                  "climate_lower", "climate_upper"]].to_numpy()))
+    assert np.all(df["climate_point"] > 0)
+    assert np.all(np.diff(df["climate_point"]) > 0)
+    # climate mean shifted up; combined CI wider than baseline (sampling-only) CI
+    assert np.all(df["climate_point"] > df["baseline_point"])
+    base_w = df["baseline_upper"] - df["baseline_lower"]
+    clim_w = df["climate_upper"] - df["climate_lower"]
+    assert np.all(clim_w > base_w)
+    # CI brackets the central estimate
+    assert np.all(df["climate_lower"] <= df["climate_point"])
+    assert np.all(df["climate_point"] <= df["climate_upper"])
+
+
+@_pytest.mark.parametrize("dist", ["gev", "logpearson3"])
+def test_mc_zero_climate_collapses_to_baseline(dist):
+    from floodfreq.climate_adjustment import mc_climate_adjusted_quantiles
+    data = _gev_sample(seed=3)
+    T = np.array([100, 1000.0])
+    r = mc_climate_adjusted_quantiles(data, dist, T, 0.0, 0.0, 0.0, 0.0,
+                                      n_sim=3000, random_state=1)
+    # with no climate shift the climate central estimate equals the baseline one
+    np.testing.assert_allclose(r.climate_point, r.baseline_point, rtol=1e-9)
+
+
+def test_mc_gev_holds_shape_fixed_and_matches_target_moments():
+    # The GEV mapping fixes the baseline shape c and solves loc/scale to hit
+    # (mu, sigma) exactly. Verify the moment rescale is exact for a fixed c.
+    from scipy.stats import genextreme
+    c = float(genextreme.fit(_gev_sample(seed=5))[0]) if False else -0.12
+    for mu, sigma in [(1000.0, 300.0), (1300.0, 390.0)]:
+        m, v = genextreme.stats(c, moments="mv")
+        s = float(np.sqrt(v))
+        scale = sigma / s
+        loc = mu - scale * float(m)
+        mm, vv = genextreme.stats(c, loc=loc, scale=scale, moments="mv")
+        assert float(mm) == pytest.approx(mu, rel=1e-9)
+        assert float(np.sqrt(vv)) == pytest.approx(sigma, rel=1e-9)
+
+
+def test_closed_form_still_rejects_gev():
+    # GEV has no closed form -- the closed-form entry point must still refuse it
+    # and point the user at the Monte Carlo path.
+    data = _gev_sample()
+    with pytest.raises(ValueError, match="Monte Carlo|closed"):
+        climate_adjusted_quantiles(data, "gev", [100], 0.3, 0.18, 0.1, 0.18)

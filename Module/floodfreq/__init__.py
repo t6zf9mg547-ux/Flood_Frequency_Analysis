@@ -1,2 +1,2 @@
 """floodfreq: flood frequency analysis on annual-maximum inflow series."""
-__version__ = "0.8.0"
+__version__ = "0.9.0"

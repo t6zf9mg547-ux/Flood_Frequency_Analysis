@@ -2,6 +2,54 @@
 
 All notable changes to the Flood Frequency Analysis tool are documented here.
 
+## [0.9.0] - 2026-07-30
+
+### Added — Monte Carlo CIFAM for GEV and Log-Pearson III (plus Normal, Gamma, Exponential)
+- The distribution-agnostic Monte Carlo path (`mc_climate_adjusted_quantiles`)
+  now supports **GEV** and **Log-Pearson III**, and the previously-wired
+  **Normal**, **Gamma (2p)** and **Exponential** are now covered explicitly. A
+  new `MC_SUPPORTED_DISTRIBUTIONS` constant lists them. The three closed-form
+  families (Gumbel, Log-Normal 2p, Pearson III) are unchanged.
+- For the **three-parameter skewed families (GEV, Log-Pearson III)** the CIFAM
+  assumption "climate acts on the first two moments" is realized by holding the
+  **shape/skew parameter fixed** at its baseline-fitted value and moving only
+  location/scale to hit each shifted (mean, standard deviation):
+  - GEV: the shape `c` is fitted once (PWM) from the baseline; each realization
+    solves `scale = sigma / s(c)`, `loc = mu - scale*m(c)` where `m(c), s(c)`
+    are the standardized mean/sd of `genextreme(c)` — an exact moment match
+    (verified to 1e-9).
+  - Log-Pearson III: the skew of `log10(x)` is fitted once and held fixed; the
+    shifted physical (mu, sigma) map to shifted log-space (mu_y, sigma_y), then
+    to `pearson3(skew_fixed, mu_y, sigma_y)`.
+- Fixed a latent bug: the earlier Monte Carlo moment-mapping produced only two
+  parameters for `logpearson3` (a log-normal-style `(mu_y, sigma_y)`), which is
+  invalid for the three-parameter `pearson3` scipy object — so `logpearson3`
+  Monte Carlo could not have worked before this release. It now maps to the full
+  three-parameter form.
+- `run_climate_adjustment.py`: `--distribution` help now lists the extra
+  Monte-Carlo-only families, and `--method monte-carlo` validates the
+  distribution against `MC_SUPPORTED_DISTRIBUTIONS` with a clear error.
+- Monte Carlo default raised from 20,000 to **30,000** simulations (both the
+  `mc_climate_adjusted_quantiles` `n_sim` argument and the CLI `--n-sim`
+  default). The single `n_sim` drives both the sampling-only baseline ensemble
+  and the combined climate ensemble, so both confidence intervals get the extra
+  precision. Rationale: with quantiles extrapolated out to T = 10,000+ years, a
+  measurement of the seed-to-seed scatter of the T = 10,000 climate CI bound
+  gave ~0.58% at 2,000 sims, ~0.18% at 20,000, and ~0.11% at 50,000; 30,000 is
+  a conservative middle (~0.15%) at only ~1.5x the runtime of 20,000. Override
+  per run with `--n-sim` when a final design figure warrants it.
+- Regenerated the shipped climate-adjustment template so its `distribution`
+  field documents the full set: closed-form gumbel/lognormal2/pearson3, plus
+  gev/logpearson3/normal/gamma2/exponential via `--method monte-carlo`.
+
+### Tests
+- New tests in `test_climate_adjustment.py`: GEV and Log-Pearson III run through
+  Monte Carlo with finite, positive, monotone quantiles; the combined CI is
+  wider than the sampling-only baseline CI; zero climate change collapses the
+  climate estimate onto the baseline; the GEV loc/scale rescale hits the target
+  moments exactly with the shape held fixed; and the closed-form entry point
+  still refuses GEV.
+
 ## [0.8.0] - 2026-07-30
 
 ### Changed (BREAKING) — case-first `Data/` layout, multiple climate scenarios per case

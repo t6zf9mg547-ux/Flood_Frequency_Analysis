@@ -19,11 +19,14 @@ Flood_Frequency_Analysis/
 ├── Data/            # input data, case-first: Data/<CaseName>/ (only Data/Templates/ is tracked)
 │   ├── Templates/                # ALL shipped example/template files live here (the only tracked
 │   │   │                         # part of Data/); a real case under Data/<CaseName>/ is never tracked
-│   │   ├── candidate_descriptors_discharge_TEMPLATE.csv   # pooling-group candidate catalogs
-│   │   ├── candidate_descriptors_rainfall_TEMPLATE.csv
-│   │   ├── discharge_station_data/     # matching annual-maximum series, one CSV per candidate
-│   │   ├── rainfall_station_data/      # matching annual-maximum series, one CSV per candidate
-│   │   └── ...                         # single-station + climate-adjustment templates too
+│   │   ├── Template.csv           # single-station baseline series template
+│   │   ├── Climate_Adjustment/    # climate-adjustment scenario template(s)
+│   │   └── Regional/              # regional + pooling-group templates:
+│   │       ├── candidate_descriptors_discharge_TEMPLATE.csv   # pooling-group candidate catalogs
+│   │       ├── candidate_descriptors_rainfall_TEMPLATE.csv
+│   │       ├── discharge_station_data/     # matching annual-maximum series, one CSV per candidate
+│   │       ├── rainfall_station_data/      # matching annual-maximum series, one CSV per candidate
+│   │       └── Template/                    # regional-analysis station CSVs (STN_*.csv)
 │   ├── <CaseName>/              # one folder per case (not tracked)
 │   │   ├── <CaseName>.csv        #   baseline annual-maximum series (named after the folder)
 │   │   ├── <CaseName>.toml       #   optional per-case settings
@@ -174,23 +177,23 @@ If you do have a larger candidate pool, the four-step recipe:
 
 1. **Duplicate the descriptor catalog** — one row per candidate station:
    ```bash
-   cp Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv Data/Templates/my_candidates.csv
+   cp Data/Templates/Regional/candidate_descriptors_discharge_TEMPLATE.csv Data/Templates/Regional/my_candidates.csv
    ```
    Replace the example rows with your real candidates' real descriptor values.
 
 2. **Duplicate the matching station-data folder** — each candidate's own annual-maximum series:
    ```bash
-   cp -r Data/Templates/discharge_station_data Data/Templates/my_station_data
+   cp -r Data/Templates/Regional/discharge_station_data Data/Templates/Regional/my_station_data
    ```
    Replace the example CSVs with your real stations' `year,Q` files. **The filename must exactly match the `station` value in your catalog** — a catalog row with `station=GAUGE_014` needs a file named `GAUGE_014.csv`.
 
 3. **Run it** against your own files:
    ```bash
    uv run python Module/form_pooling_group.py \
-       --catalog Data/Templates/my_candidates.csv \
+       --catalog Data/Templates/Regional/my_candidates.csv \
        --descriptors area_km2 mean_annual_precip_mm \
        --target-station GAUGE_014 --n-stations 6 --region-name MyNewRegion \
-       --station-data-dir Data/Templates/my_station_data --apply
+       --station-data-dir Data/Templates/Regional/my_station_data --apply
    ```
 
 4. **Run the actual analysis** on the result:
@@ -207,30 +210,30 @@ This is deliberately **descriptor-source-agnostic** — it doesn't extract descr
 - **Streamflow gauges**: catchment area, mean annual precipitation, a soil/permeability index, channel slope, urban extent — i.e. attributes of the drainage basin. A natural source is [HydroSHEDS/BasinATLAS](https://www.hydrosheds.org/), which provides these at the sub-basin level (snap each gauge's coordinates to its containing sub-basin to look them up).
 - **Rain gauges** (or any other generic annual-maximum variable): geographic coordinates, elevation, and a point climatology (e.g. mean annual precipitation sampled directly from a gridded product like WorldClim/CHELSA at the station's coordinates) — basin-level attributes like soil permeability or channel slope don't mean anything for a point measurement with no upstream catchment.
 
-Producing the candidate catalog CSV (i.e. actually looking up descriptor values for your stations) is outside this script's scope — bring your own GIS workflow. Two example catalogs are bundled so you can try the CLI immediately, no editing required: `Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv` (10 synthetic gauges: `area_km2`, `mean_annual_precip_mm`, `bfihost`, `mean_slope_m_per_km`, `urban_extent_frac`, `n_years`) and `Data/Templates/candidate_descriptors_rainfall_TEMPLATE.csv` (10 synthetic rain gauges: `lat`, `lon`, `elevation_m`, `mean_annual_precip_mm`, `n_years`). Column names in both are illustrative — rename them to match your own extraction, or just pass whatever names your own catalog actually uses via `--descriptors`.
+Producing the candidate catalog CSV (i.e. actually looking up descriptor values for your stations) is outside this script's scope — bring your own GIS workflow. Two example catalogs are bundled so you can try the CLI immediately, no editing required: `Data/Templates/Regional/candidate_descriptors_discharge_TEMPLATE.csv` (10 synthetic gauges: `area_km2`, `mean_annual_precip_mm`, `bfihost`, `mean_slope_m_per_km`, `urban_extent_frac`, `n_years`) and `Data/Templates/Regional/candidate_descriptors_rainfall_TEMPLATE.csv` (10 synthetic rain gauges: `lat`, `lon`, `elevation_m`, `mean_annual_precip_mm`, `n_years`). Column names in both are illustrative — rename them to match your own extraction, or just pass whatever names your own catalog actually uses via `--descriptors`.
 
-Each catalog has a matching folder of synthetic annual-maximum series, one CSV per candidate, with each station's record length matching its catalog row's `n_years` and its magnitude scaled (loosely, illustratively) with its own `area_km2`/`mean_annual_precip_mm` — enough to run the full pipeline (`--apply` → `run_regional_analysis.py`) end to end using only bundled content: `Data/Templates/discharge_station_data/` (columns `year,Q`) and `Data/Templates/rainfall_station_data/` (columns `year,Rainfall_mm`).
+Each catalog has a matching folder of synthetic annual-maximum series, one CSV per candidate, with each station's record length matching its catalog row's `n_years` and its magnitude scaled (loosely, illustratively) with its own `area_km2`/`mean_annual_precip_mm` — enough to run the full pipeline (`--apply` → `run_regional_analysis.py`) end to end using only bundled content: `Data/Templates/Regional/discharge_station_data/` (columns `year,Q`) and `Data/Templates/Regional/rainfall_station_data/` (columns `year,Rainfall_mm`).
 
 ```bash
 # Try it right now with the bundled discharge template (dry run)
 uv run python Module/form_pooling_group.py \
-    --catalog Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv \
+    --catalog Data/Templates/Regional/candidate_descriptors_discharge_TEMPLATE.csv \
     --descriptors area_km2 mean_annual_precip_mm bfihost mean_slope_m_per_km urban_extent_frac \
     --target-station GAUGE_001 --n-stations 4 --region-name MyRegion
 
 # ...or the bundled rainfall template
 uv run python Module/form_pooling_group.py \
-    --catalog Data/Templates/candidate_descriptors_rainfall_TEMPLATE.csv \
+    --catalog Data/Templates/Regional/candidate_descriptors_rainfall_TEMPLATE.csv \
     --descriptors lat lon elevation_m mean_annual_precip_mm \
     --target-station RAINGAUGE_001 --n-stations 4 --region-name MyRegion
 
 # Full pipeline using ONLY bundled content: form the group, copy the station
 # CSVs, then actually run the regional analysis on the result
 uv run python Module/form_pooling_group.py \
-    --catalog Data/Templates/candidate_descriptors_discharge_TEMPLATE.csv \
+    --catalog Data/Templates/Regional/candidate_descriptors_discharge_TEMPLATE.csv \
     --descriptors area_km2 mean_annual_precip_mm bfihost mean_slope_m_per_km urban_extent_frac \
     --target-station GAUGE_001 --n-stations 5 --region-name MyRegion \
-    --station-data-dir Data/Templates/discharge_station_data --apply
+    --station-data-dir Data/Templates/Regional/discharge_station_data --apply
 uv run python Module/run_regional_analysis.py MyRegion
 
 # Dry run against your own catalog
@@ -318,7 +321,7 @@ uv run python Module/run_climate_adjustment.py MyCase rcp85 --delta1 0.30 --delt
 uv run python Module/run_climate_adjustment.py MyCase rcp85 --variable-name "Peak inflow" --units m3/s --short-name Inflow
 ```
 
-`--method closed-form` (default) covers Gumbel, Log-Normal (2p) and Pearson III; any other distribution requires `--method monte-carlo`. The Monte Carlo path is also the route that will later extend to the tool's remaining candidate distributions.
+`--method closed-form` (default) covers Gumbel, Log-Normal (2p) and Pearson III. `--method monte-carlo` additionally supports GEV, Log-Pearson III, Normal, Gamma (2p) and Exponential — for the three-parameter skewed families (GEV, Log-Pearson III) the shape/skew is held fixed at its baseline-fitted value and only location and scale are shifted, consistent with the CIFAM assumption that climate change acts on the first two moments.
 
 Note that the Log-Normal closed form uses an exact delta-method variance derived for this implementation rather than the paper's published Log-Normal variance term, which overestimates the true (Monte-Carlo) variance by ~45% at realistic coefficients of variation; see the module docstring and CHANGELOG [0.6.0] for details and for the Lom Pangar validation.
 
@@ -345,7 +348,7 @@ result = climate_adjusted_quantiles(
 result.to_frame()   # T, baseline point + CI, climate point + combined CI
 ```
 
-Extending the Monte Carlo path to the tool's other candidate distributions is the remaining planned work for this feature.
+The Monte Carlo path covers GEV, Log-Pearson III, Normal, Gamma (2p) and Exponential in addition to the three closed-form families; extending it to the remaining candidate distributions (e.g. 3-parameter log-normal) is the residual planned work.
 
 ## Per-case settings file (optional)
 

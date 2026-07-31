@@ -53,6 +53,7 @@ from floodfreq.climate_adjustment import (
     climate_adjusted_quantiles,
     mc_climate_adjusted_quantiles,
     CLOSED_FORM_DISTRIBUTIONS,
+    MC_SUPPORTED_DISTRIBUTIONS,
 )
 from floodfreq.plots import save_climate_adjustment_plot
 
@@ -191,7 +192,8 @@ def parse_args():
     p.add_argument("--tau2", type=float, default=None, help="Override: ensemble sd of tau1")
     p.add_argument("--distribution", default=None,
                    help=f"Override the distribution. Closed form: {', '.join(CLOSED_FORM_DISTRIBUTIONS)}. "
-                        f"Other distributions require --method monte-carlo.")
+                        f"With --method monte-carlo also: "
+                        f"{', '.join(d for d in MC_SUPPORTED_DISTRIBUTIONS if d not in CLOSED_FORM_DISTRIBUTIONS)}.")
     p.add_argument("--confidence-level", type=float, default=None,
                    help="Override the two-sided CI level in percent (e.g. 90)")
     p.add_argument("--pmf", type=float, default=None, help="Override the PMF reference value")
@@ -199,7 +201,7 @@ def parse_args():
                    help="Override return periods, comma-separated (e.g. 100,1000,10000)")
     p.add_argument("--method", choices=["closed-form", "monte-carlo"], default="closed-form",
                    help="closed-form (default; Gumbel/Log-Normal/Pearson III only) or monte-carlo (any distribution)")
-    p.add_argument("--n-sim", type=int, default=20000, help="Monte Carlo simulations (--method monte-carlo only)")
+    p.add_argument("--n-sim", type=int, default=30000, help="Monte Carlo simulations (--method monte-carlo only)")
     p.add_argument("--random-state", type=int, default=0, help="Monte Carlo RNG seed (reproducibility)")
     p.add_argument("--no-plot", action="store_true", help="Skip PNG plot generation")
     p.add_argument("--return-period-axis", action="store_true",
@@ -258,11 +260,15 @@ def main():
     if args.method == "closed-form":
         if distribution not in CLOSED_FORM_DISTRIBUTIONS:
             sys.exit(f"ERROR: '{distribution}' has no closed form. Use one of "
-                     f"{CLOSED_FORM_DISTRIBUTIONS}, or add --method monte-carlo.")
+                     f"{CLOSED_FORM_DISTRIBUTIONS}, or add --method monte-carlo "
+                     f"(supported: {', '.join(MC_SUPPORTED_DISTRIBUTIONS)}).")
         result = climate_adjusted_quantiles(
             Q, distribution, return_periods, delta1, delta2, tau1, tau2,
             confidence_level=confidence_level)
     else:
+        if distribution not in MC_SUPPORTED_DISTRIBUTIONS:
+            sys.exit(f"ERROR: Monte Carlo climate adjustment is not defined for "
+                     f"'{distribution}'. Supported: {', '.join(MC_SUPPORTED_DISTRIBUTIONS)}.")
         result = mc_climate_adjusted_quantiles(
             Q, distribution, return_periods, delta1, delta2, tau1, tau2,
             confidence_level=confidence_level, n_sim=args.n_sim,

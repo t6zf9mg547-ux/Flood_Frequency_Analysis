@@ -53,6 +53,9 @@ Thumbs.db
 /Plot/*
 !/Plot/.gitkeep
 
+# Generated PDFs -- regenerable, not tracked
+*.pdf
+
 # Logs
 *.log
 
