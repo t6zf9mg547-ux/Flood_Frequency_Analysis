@@ -15,6 +15,35 @@ import numpy as np
 from scipy import stats
 
 
+def _years_to_numeric(years):
+    """Coerce a year column to a numeric array for arithmetic (diffs, spans,
+    Sen's slope), while the caller keeps the original labels for display.
+
+    Handles the common formats:
+      - already numeric (int/float years)               -> unchanged
+      - hydrological-year labels 'YYYY/YYYY' or 'YYYY-YYYY'
+                                                        -> the START year (int)
+      - plain numeric strings '1950'                    -> 1950
+    Returns None if the column can't be interpreted numerically (so callers can
+    skip year-based checks rather than crash on an unsupported format)."""
+    if years is None:
+        return None
+    arr = np.asarray(years)
+    if np.issubdtype(arr.dtype, np.number):
+        return arr.astype(float)
+    out = []
+    for label in arr.tolist():
+        s = str(label).strip()
+        # leading run of digits = start year of 'YYYY/YYYY', 'YYYY-YYYY', or a plain year
+        i = 0
+        while i < len(s) and s[i].isdigit():
+            i += 1
+        if i == 0:
+            return None  # no leading number -> can't interpret
+        out.append(float(s[:i]))
+    return np.asarray(out, dtype=float)
+
+
 def sens_slope(x: np.ndarray, t=None) -> dict:
     """
     Theil-Sen slope estimator: the median of all pairwise slopes
@@ -146,23 +175,33 @@ def validate_series(x: np.ndarray, years=None) -> list:
         if len(years) != n:
             warnings.append("Year column length doesn't match the data column length.")
         else:
+            # duplicate check works on the original labels (numeric or text)
             if len(set(years.tolist())) != len(years):
                 warnings.append("Duplicate year(s) found in the series.")
-            if np.any(np.diff(years) < 0):
-                warnings.append("Years are not sorted in increasing order.")
-            expected_span = years.max() - years.min() + 1
-            if expected_span != n:
-                warnings.append(f"Year range spans {int(expected_span)} years but there are "
-                                 f"only {n} values — {int(expected_span - n)} year(s) may be missing.")
+            # arithmetic checks need numeric years; hydrological-year labels
+            # like 'YYYY/YYYY' are coerced to their start year. If the column
+            # can't be interpreted numerically, skip these checks rather than
+            # crash.
+            ynum = _years_to_numeric(years)
+            if ynum is not None:
+                if np.any(np.diff(ynum) < 0):
+                    warnings.append("Years are not sorted in increasing order.")
+                expected_span = ynum.max() - ynum.min() + 1
+                if expected_span != n:
+                    warnings.append(f"Year range spans {int(expected_span)} years but there are "
+                                     f"only {n} values — {int(expected_span - n)} year(s) may be missing.")
 
     return warnings
 
 
 def run_all(x: np.ndarray, years=None, alpha: float = 0.05) -> dict:
     """Bundle all checks into one dict, ready for reporting."""
+    # Sen's slope needs numeric time; coerce year labels (e.g. 'YYYY/YYYY').
+    # Falls back to an integer index if the labels aren't interpretable.
+    t_numeric = _years_to_numeric(years)
     return {
         "validation_warnings": validate_series(x, years=years),
         "mann_kendall": mann_kendall_test(x, alpha=alpha),
-        "sens_slope": sens_slope(x, t=years),
+        "sens_slope": sens_slope(x, t=t_numeric),
         "grubbs": grubbs_outlier_test(x, alpha=alpha),
     }

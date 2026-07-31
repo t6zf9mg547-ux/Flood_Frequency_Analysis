@@ -7,7 +7,7 @@
 
 [project]
 name = "flood-frequency-analysis"
-version = "0.9.0"
+version = "0.9.1"
 description = "Flood frequency analysis on annual-maximum inflow series: fits 9 candidate distributions (Normal, LogNormal 2p/3p, Gumbel, GEV, Exponential, Gamma, Pearson III, Log-Pearson III) via MOM/MLE/PWM, ranks them by AIC/BIC/KS, and reports a best-fit recommendation with bootstrap confidence intervals."
 requires-python = ">=3.11"
 dependencies = [

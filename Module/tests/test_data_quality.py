@@ -136,3 +136,42 @@ def test_run_all_bundles_every_check(reference_data):
     x, years = reference_data
     result = run_all(x, years=years)
     assert set(result.keys()) == {"validation_warnings", "mann_kendall", "sens_slope", "grubbs"}
+
+
+# -- string / hydrological-year labels (e.g. 'YYYY/YYYY') -- #
+
+def test_run_all_accepts_hydrological_year_labels():
+    """Year columns like '1950/1951' are strings; run_all must coerce them to
+    numeric (start year) rather than crashing on str arithmetic. Regression
+    guard for the 'unsupported operand type(s) for -: str and str' bug."""
+    x = [50.0, 60.0, 40.0, 70.0, 55.0, 80.0, 45.0]
+    years = [f"{y}/{y+1}" for y in range(1950, 1957)]
+    result = run_all(np.asarray(x), years=years)  # must not raise
+    # year-based checks actually ran (not silently skipped): a clean 7-year
+    # consecutive span produces no missing-year / ordering warnings
+    warns = result["validation_warnings"]
+    assert not any("not sorted" in w for w in warns)
+    assert not any("may be missing" in w for w in warns)
+    # Sen's slope produced a finite number using the parsed years
+    assert np.isfinite(result["sens_slope"]["slope"])
+
+
+def test_validate_series_detects_gap_in_hydrological_year_labels():
+    x = [50.0, 60.0, 40.0, 70.0]
+    # gap: 1951/1952 is missing between 1950/1951 and 1952/1953
+    years = ["1950/1951", "1952/1953", "1953/1954", "1954/1955"]
+    warns = validate_series(np.asarray(x), years=years)
+    assert any("may be missing" in w for w in warns)
+
+
+def test_years_to_numeric_handles_formats():
+    from floodfreq.data_quality import _years_to_numeric
+    import numpy as np
+    np.testing.assert_array_equal(
+        _years_to_numeric(["1950/1951", "1951/1952"]), [1950.0, 1951.0])
+    np.testing.assert_array_equal(
+        _years_to_numeric(["1950-1951", "1951-1952"]), [1950.0, 1951.0])
+    np.testing.assert_array_equal(_years_to_numeric([1950, 1951]), [1950.0, 1951.0])
+    np.testing.assert_array_equal(_years_to_numeric(["1950", "1951"]), [1950.0, 1951.0])
+    # uninterpretable -> None (caller skips year checks rather than crashing)
+    assert _years_to_numeric(["a", "b"]) is None

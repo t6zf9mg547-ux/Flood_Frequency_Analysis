@@ -80,6 +80,30 @@ def test_save_pdf_report(fitted_ffa, tmp_path):
     assert len(reader.pages) >= 5  # text page(s) + dashboard + individual plots
 
 
+def test_text_page_shrinks_font_so_wide_lines_fit():
+    """The summary text page must not clip wide lines (tables, long sentences)
+    at the right margin: the auto-sized monospace font has to be small enough
+    that the widest line fits the usable page width. Regression guard for the
+    fixed-8pt clipping bug."""
+    import matplotlib.pyplot as plt
+    # a line far wider than fits at 8pt on a portrait letter page
+    wide = "X" * 130
+    text = "short header\n" + wide + "\nshort footer"
+    fig = plt.figure(figsize=(8.5, 11))
+    P._text_page(fig, text)
+    # find the rendered text artist and its font size
+    ax = fig.axes[0]
+    txt = [t for t in ax.texts][0]
+    fs = txt.get_fontsize()
+    # width a monospace line occupies ~ 0.6 * fontsize * n_chars points;
+    # usable width is 8.5in * 72 * (1 - 2*0.02). The chosen font must fit.
+    usable_pts = 8.5 * 72.0 * (1.0 - 0.04)
+    assert 0.6 * fs * len(wide) <= usable_pts + 1e-6, \
+        f"font {fs}pt too large: 130-char line would overflow the page"
+    assert fs >= 4.5  # but not absurdly tiny
+    plt.close(fig)
+
+
 def test_probability_plot_uses_custom_variable_labels(reference_data):
     # confirms the variable_name/units/short_name generalization (added for
     # non-streamflow use, e.g. rainfall) actually reaches the rendered plot

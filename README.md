@@ -352,15 +352,33 @@ The Monte Carlo path covers GEV, Log-Pearson III, Normal, Gamma (2p) and Exponen
 
 ## Per-case settings file (optional)
 
-Instead of retyping flags every time, save a case's settings in `Data/<CaseName>/<CaseName>.toml`:
+Instead of retyping flags every time, save a case's settings in `Data/<CaseName>/<CaseName>.toml`. A minimal file is just the settings you care about — for example, "always use a 95% CI and always write the PDF report":
 ```toml
-confidence_level = 90
-regional_skew = 0.0
-regional_skew_mse = 0.15
-n_boot = 2000
+confidence_level = 95
 pdf_report = true
 ```
-Then `uv run python Module/run_analysis.py P1009` picks these up automatically — no flags needed. Any CLI flag you *do* pass still overrides the file for that one run (e.g. `--confidence-level 95` overrides the `90` above without touching the saved file). Recognized keys mirror the CLI flag names with underscores instead of dashes: `value_col`, `year_col`, `variable_name`, `units`, `short_name`, `plotting_position`, `descriptive_plotting_position`, `n_boot`, `confidence_level`, `regional_skew`, `regional_skew_mse`, `no_plots`, `xlsx_report`, `pdf_report`.
+Then `uv run python Module/run_analysis.py P1009` picks these up automatically — no flags needed. A case with no `.toml` file, or a file that omits a key, simply uses the defaults; nothing here is required. Any CLI flag you *do* pass still overrides the file for that one run (e.g. `--confidence-level 90` overrides the `95` above without touching the saved file).
+
+**Save it as plain text.** On macOS, TextEdit defaults to Rich Text (RTF) and will silently wrap the file in formatting markup, which fails to parse. Either use `Format → Make Plain Text` before saving, or create it from the terminal:
+```bash
+printf 'confidence_level = 95\npdf_report = true\n' > Data/P1009/P1009.toml
+```
+
+All keys are optional and mirror the CLI flag names with underscores instead of dashes. The most useful for a single-station run:
+
+| key | default | what it does |
+|-----|---------|--------------|
+| `confidence_level` | 95 | CI level (%) for the bootstrap intervals |
+| `pdf_report` | false | also write the bundled `<CaseName>_report.pdf` |
+| `n_boot` | 1000 | bootstrap resamples for the CIs (higher = smoother bands, slower) |
+| `no_plots` | false | skip PNG plot generation |
+| `xlsx_report` | false | also write an `.xlsx` report |
+| `value_col` / `year_col` | auto | column names, if auto-detection picks wrong |
+| `variable_name` / `units` / `short_name` | flow defaults | axis labels and titles (e.g. for rainfall) |
+| `plotting_position` / `descriptive_plotting_position` | — | plotting-position formula for probability plots |
+| `regional_skew` / `regional_skew_mse` | — | weighted-skew inputs (specialized Log-Pearson III workflows) |
+
+You almost certainly only need the first two or three. `n_boot` is worth knowing: it's how many times the tool resamples your record (with replacement), refits the distribution, and reads off the quantile spread to build the confidence interval — the default of 1000 is fine for a single-station report, and you'd only raise it (e.g. to 2000) if you want slightly smoother CI bands and don't mind a slower run.
 
 A case with no `.toml` file behaves exactly as before — this is entirely optional.
 

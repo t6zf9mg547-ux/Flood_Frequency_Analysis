@@ -178,8 +178,10 @@ def data_quality_plot(ffa, ax=None):
         fig, ax = plt.subplots(figsize=(8, 4.5))
 
     x = ffa.data
-    t = ffa.years if ffa.years is not None else np.arange(1, x.size + 1)
-    t = np.asarray(t, dtype=float)
+    from .data_quality import _years_to_numeric
+    t = _years_to_numeric(ffa.years) if ffa.years is not None else None
+    if t is None:
+        t = np.arange(1, x.size + 1)
 
     dqr = ffa.data_quality()
     mk = dqr["mann_kendall"]
@@ -297,15 +299,36 @@ def save_dashboard(ffa, path, best_key, best_method, n_boot=500, alpha=0.05, dpi
     return path
 
 
-def _text_page(fig, text, fontsize=8):
+def _text_page(fig, text, fontsize=8, max_fontsize=8, min_fontsize=4.5):
+    """Render a monospace text page, shrinking the font if any line is too wide
+    to fit the page so nothing is clipped at the right margin.
+
+    matplotlib text neither wraps nor auto-fits, so a fixed font size clips long
+    lines (wide tables, long sentences) at the page edge. Here we size the font
+    to the widest line on the page: a monospace glyph is ~0.6*fontsize points
+    wide, the usable width is the figure width minus small left/right margins,
+    so fontsize <= usable_width_pts / (0.6 * max_line_chars). The result is
+    clamped to [min_fontsize, max_fontsize].
+    """
     ax = fig.add_subplot(111)
     ax.axis("off")
-    ax.text(0.02, 0.98, text, transform=ax.transAxes, fontsize=fontsize,
+
+    lines = text.split("\n")
+    max_chars = max((len(ln) for ln in lines), default=1)
+
+    left, right = 0.02, 0.02
+    fig_width_pts = fig.get_figwidth() * 72.0
+    usable_pts = fig_width_pts * (1.0 - left - right)
+    # 0.6 is the approximate advance width of a monospace glyph in em units
+    fit_fontsize = usable_pts / (0.6 * max(max_chars, 1))
+    fontsize = max(min_fontsize, min(max_fontsize, fit_fontsize))
+
+    ax.text(left, 0.98, text, transform=ax.transAxes, fontsize=fontsize,
             va="top", family="monospace")
 
 
 def save_pdf_report(ffa, path, best_key, best_method, recommendation_text,
-                     n_boot=500, alpha=0.05, lines_per_page=62, dpi=150):
+                     n_boot=500, alpha=0.05, lines_per_page=46, dpi=150):
     """
     Single PDF bundling the text summary (paginated) + the dashboard +
     each individual full-size plot -- the one file to actually hand to a
@@ -320,12 +343,22 @@ def save_pdf_report(ffa, path, best_key, best_method, recommendation_text,
     from matplotlib.backends.backend_pdf import PdfPages
 
     with PdfPages(path) as pdf:
-        # -- Text summary, paginated -- #
+        # -- Text summary, paginated (landscape) -- #
         text_lines = recommendation_text.split("\n")
+        # Landscape letter: 11in wide. Size the monospace font once, from the
+        # widest line in the WHOLE summary, so every text page uses the same
+        # (readable, non-clipping) size. The extra width vs portrait means the
+        # font rarely needs to shrink below the 8pt target.
+        page_w_in = 11.0
+        global_max_chars = max((len(ln) for ln in text_lines), default=1)
+        usable_pts = page_w_in * 72.0 * (1.0 - 0.02 - 0.02)
+        page_fontsize = max(4.5, min(9.0, usable_pts / (0.6 * max(global_max_chars, 1))))
+        # landscape pages are shorter than portrait, so fewer rows per page
         for i in range(0, len(text_lines), lines_per_page):
             chunk = "\n".join(text_lines[i:i + lines_per_page])
-            fig = plt.figure(figsize=(8.5, 11))
-            _text_page(fig, chunk)
+            fig = plt.figure(figsize=(11.0, 8.5))
+            _text_page(fig, chunk, fontsize=page_fontsize,
+                       max_fontsize=page_fontsize, min_fontsize=page_fontsize)
             pdf.savefig(fig, dpi=dpi)
             plt.close(fig)
 
@@ -354,9 +387,11 @@ def save_pdf_report(ffa, path, best_key, best_method, recommendation_text,
         pdf.savefig(fig, dpi=dpi)
         plt.close(fig)
 
-        fig, ax = plt.subplots(figsize=(8, 8))
+        fig = plt.figure(figsize=(11.0, 8.5))
+        # square diagram centered on a landscape page (keep the report's
+        # orientation consistent; equal axes still matter for this plot)
+        ax = fig.add_axes([0.30, 0.08, 0.40, 0.84])
         moment_ratio_diagram(ffa, ax=ax)
-        fig.tight_layout()
         pdf.savefig(fig, dpi=dpi)
         plt.close(fig)
 
@@ -756,7 +791,10 @@ def save_regional_station_series_plot(result, path, ncols=3, dpi=150):
         ax = axes.flatten()[i]
         x = np.asarray(result.station_data[s.name], dtype=float)
         years = result.station_years.get(s.name) if result.station_years else None
-        t = np.asarray(years, dtype=float) if years is not None else np.arange(1, x.size + 1)
+        from .data_quality import _years_to_numeric
+        t = _years_to_numeric(years) if years is not None else None
+        if t is None:
+            t = np.arange(1, x.size + 1)
         ax.plot(t, x, "o-", ms=3, lw=1, color="steelblue")
         ax.axhline(s.mean, color="gray", ls="--", lw=1)
         ax.set_title(s.name, fontsize=9)
